@@ -1,12 +1,12 @@
 /* gt-usli-2015 flight software ver 0.3 */
 /*
  * About:
- * Flight code for the teeensy in the rocket body.
- * There is a function for every state that is 
+ * Flight code for the Teensy in the rocket body.
+ * There is a function for every state that is
  * called in a loop with a speed based on loop_time_ms.
- * Update methods update global variables that are 
+ * Update methods update global variables that are
  *     relied upon in different parts of the code.
- * Log methods log data that is updated using the 
+ * Log methods log data that is updated using the
  *     update methods.
  */
 #include <SPI.h>
@@ -49,8 +49,8 @@ enum states state = INIT;
 /* Hardware connections */
 Servo servos[3];
 Adafruit_ADXL345_Unified accel = Adafruit_ADXL345_Unified(12345); // Why is 12345 specified
-const int chipSelect = 4; // Figure out what this does
-const int ledPin = 20; // This is a random value, change to the right one!
+const int chip_select = 4; // Figure out what this does
+const int led_pin = 20; // This is a random value, change to the right one!
 
 /* Constants */
 const int LAUNCH_RAIL_TIME_MS = 100;
@@ -65,9 +65,9 @@ unsigned long init_time;
 unsigned long init_launch_time;
 int curr_altitude, prev_altitude;
 
-sensors_event_t accelEvent;
-unsigned long lastLedBlink = 0;
-bool ledOn = 0;
+sensors_event_t accel_event;
+unsigned long last_led_blink = 0;
+bool last_on = 0;
 File file;
 
 void setup()
@@ -82,7 +82,7 @@ void loop()
     case INIT:
         state_init();
         break;
-    case LAUNCH_STDBY: 
+    case LAUNCH_STDBY:
         state_launch_stdby();
         break;
     case LAUNCH_RDY:
@@ -122,7 +122,7 @@ void state_init()
     /* Initialize SD Card */
     pinMode(10, OUTPUT); // Necessary even if chip select pin isn't used.
 
-    if (!SD.begin(chipSelect)) {
+    if (!SD.begin(chip_select)) {
         Serial.println("Card failed, or not present");
     } else {
         Serial.println("SD Card initialized.");
@@ -145,15 +145,15 @@ void state_init()
  */
 void state_launch_stdby()
 {
-    if (millis() - lastLedBlink > MILLIS / 10) // Blink at 10 Mhz
+    if (millis() - last_led_blink > MILLIS / 10) // Blink at 10 Mhz
     {
-        ledOn = !ledOn;
-        digitalWrite(ledPin, ledOn);
+        last_on = !last_on;
+        digitalWrite(led_pin, last_on);
     }
     /* STATE CHANGE */
     if (true) // If arm_button_pressed
     {
-        digitalWrite(ledPin, HIGH);
+        digitalWrite(led_pin, HIGH);
         loop_time_ms = LAUNCH_RDY_SPEED; // Loop at max speed (1000 Mhz)
         state = LAUNCH_RDY;
     }
@@ -167,10 +167,10 @@ void state_launch_stdby()
 void state_launch_rdy()
 {
     /* Update accel data only, don't worry about logging */
-    accel.getEvent(&accelEvent);
+    accel.getEvent(&accel_event);
 
     /* STATE CHANGE */
-    if (abs(accelEvent.acceleration.y) > 18) {
+    if (abs(accel_event.acceleration.y) > 18) {
         loop_time_ms = PWR_ASC_SPEED;
         init_launch_time = millis();
         state = PWR_ASC;
@@ -183,38 +183,38 @@ void state_launch_rdy()
  */
 void state_liftoff()
 {
-    updateLogAll();
+    update_log_all();
 
     /* STATE CHANGE */
     if (millis() - init_launch_time > LAUNCH_RAIL_TIME_MS) {
         /* Extend servos to nominal position */
-        setServos(35);
+        set_servos(35);
         state = PWR_ASC;
     }
 }
 
 /*
  * Active control state, update and log, then based
- * on that information, calculate our new servo 
+ * on that information, calculate our new servo
  * positions. Exit when a current altitude is
  * less than a previous altitude (reached apogee).
  */
 void state_pwr_asc()
 {
-    updateLogAll();
+    update_log_all();
 
     int ndx = init_launch_time / loop_time_ms;
     if (ndx > 500) ndx = 500;
     int ideal_h = table_h[ndx];
 
     int epsilon = curr_altitude - ideal_h;
-    setServos(getTheta(epsilon));
-    
+    set_servos(get_theta(epsilon));
+
     /* STATE CHANGE */
     //return true if last altitude > current altitude (ie we are past apogee)
     if (prev_altitude > curr_altitude) {
         state = DESCENT;
-        setServos(0);
+        set_servos(0);
     }
 }
 
@@ -223,12 +223,12 @@ void state_pwr_asc()
  */
 void state_descent()
 {
-    updateLogAll();
+    update_log_all();
 }
 
 /* Subroutines */
 
-void setServos(int theta)
+void set_servos(int theta)
 {
     // 0->160 , 110->50
     if (theta > 90)
@@ -243,31 +243,31 @@ void setServos(int theta)
 /*
  * Update accelerometer and altimeter and log all information.
  */
-void updateLogAll()
+void update_log_all()
 {
-    accel.getEvent(&accelEvent);
-    updateAltitude();
-    logAll();
+    accel.getEvent(&accel_event);
+    update_altitude();
+    log_all();
 }
 
 /*
  * Log information from time, accelerometer event, and whatever
  * is in the currAltitude variable.
  */
-void logAll()
+void log_all()
 {
     char buf[100];
-    sprintf(buf, "TIME: %ul, ACCEL(x,y,z), %f, %f, %f, ALT: %f", 
-        millis() - init_launch_time, accelEvent.acceleration.x, 
-        accelEvent.acceleration.y, accelEvent.acceleration.z, 
+    sprintf(buf, "TIME: %ul, ACCEL(x,y,z), %f, %f, %f, ALT: %f",
+        millis() - init_launch_time, accel_event.acceleration.x,
+        accel_event.acceleration.y, accel_event.acceleration.z,
         curr_altitude);
 }
 
-/* 
+/*
  * Saves string to SD card, returns true if worked
  * else return false.
  */
-boolean logSD(char* str)
+boolean log_SD(char* str)
 {
     if (file)
     {
@@ -282,7 +282,7 @@ boolean logSD(char* str)
  * reflect the latest info from the altimeter.
  * TODO: Test how quickly this can be called!
  */
-void updateAltitude()
+void update_altitude()
 {
     if (Serial1.available())
     {
@@ -308,7 +308,8 @@ void updateAltitude()
  * difference between current altitude and ideal
  * altitude.
  */
-int getTheta (double eps) {
+int get_theta(double eps)
+{
     int theta;
     if (abs(eps) <= 0.5)
         theta = 35;
