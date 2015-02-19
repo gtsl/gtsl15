@@ -49,7 +49,7 @@ enum states state = INIT;
 Servo servos[3];
 Adafruit_ADXL345_Unified accel = Adafruit_ADXL345_Unified(12345); // Why is 12345 specified
 const int chip_select = 4; // Figure out what this does
-const int led_pin = 20; // This is a random value, change to the right one!
+const int led_pin = 17; // This is a random value, change to the right one!
 
 /* Constants */
 const int LAUNCH_RAIL_TIME_MS = 100;
@@ -129,7 +129,7 @@ void state_init()
     }
 
     /* Initialize servo motors */
-    int pins[3] = {14,15,20};
+    int pins[3] = {21, 22, 23};
     for (i = 0; i < 3; i++)
         servos[i].attach(pins[i]);
 
