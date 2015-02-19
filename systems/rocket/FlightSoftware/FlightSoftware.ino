@@ -12,7 +12,6 @@
 #include <SPI.h>
 #include <Wire.h>
 #include <Servo.h>
-#include <ITG3200.h>
 #include <SD.h>
 #include <Adafruit_Sensor.h>
 #include <Adafruit_ADXL345_U.h>
