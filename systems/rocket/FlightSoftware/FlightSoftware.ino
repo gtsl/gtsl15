@@ -59,7 +59,7 @@ const int PWR_ASC_SPEED = MILLIS / 20; // Loop at 20 Hz
 
 /* Variables */
 int i;
-int loop_time_ms = 0;
+int loop_time_ms = LAUNCH_RDY_SPEED;
 unsigned long init_time;
 unsigned long init_launch_time;
 int curr_altitude, prev_altitude;
@@ -81,9 +81,6 @@ void loop()
     switch (state) {
     case INIT:
         state_init();
-        break;
-    case LAUNCH_STDBY:
-        state_launch_stdby();
         break;
     case LAUNCH_RDY:
         state_launch_rdy();
@@ -134,29 +131,8 @@ void state_init()
     for (i = 0; i < 3; i++)
         servos[i].attach(pins[i]);
 
-    state = LAUNCH_STDBY;
+    state = LAUNCH_RDY;
     loop_time_ms = 0;
-}
-
-/*
- * Standby state, blink LED and wait for arm switch
- * to be triggered. Run as fast as possible because
- * we are polling the arm button.
- */
-void state_launch_stdby()
-{
-    if (millis() - last_led_blink > MILLIS / 10) // Blink at 10 Mhz
-    {
-        last_on = !last_on;
-        digitalWrite(led_pin, last_on);
-    }
-    /* STATE CHANGE */
-    if (true) // If arm_button_pressed
-    {
-        digitalWrite(led_pin, HIGH);
-        loop_time_ms = LAUNCH_RDY_SPEED; // Loop at max speed (1000 Mhz)
-        state = LAUNCH_RDY;
-    }
 }
 
 /*
