@@ -15,7 +15,7 @@
 #include <SD.h>
 #include <Adafruit_Sensor.h>
 #include <Adafruit_ADXL345_U.h>
-#include "tables.h"
+// #include "tables.h"
 
 // Generic catch-all implementation.
 template <typename T_ty> struct TypeInfo { static const char * name; };
@@ -49,7 +49,7 @@ enum states state = INIT;
 Servo servos[3];
 Adafruit_ADXL345_Unified accel = Adafruit_ADXL345_Unified(12345); // Why is 12345 specified
 const int chip_select = 4; // Figure out what this does
-const int led_pin = 17;
+const int led_pin = 17; // This is a random value, change to the right one!
 
 /* Constants */
 const int LAUNCH_RAIL_TIME_MS = 100;
@@ -63,7 +63,6 @@ int loop_time_ms = 0;
 unsigned long init_time;
 unsigned long init_launch_time;
 int curr_altitude, prev_altitude;
-char alt_input[16];
 
 sensors_event_t accel_event;
 unsigned long last_led_blink = 0;
@@ -76,28 +75,9 @@ void setup()
 
 void loop()
 {
-    init_time = millis();
 
-    switch (state) {
-    case INIT:
-        state_init();
-        break;
-    case LAUNCH_STDBY:
-        state_launch_stdby();
-        break;
-    case LAUNCH_RDY:
-        state_launch_rdy();
-        break;
-    case LIFTOFF:
-        state_liftoff();
-        break;
-    case PWR_ASC:
-        state_pwr_asc();
-        break;
-    }
-
-    long delay_time = loop_time_ms - (millis() - init_time);
-    if (delay_time > 0) delay(delay_time);
+    // long delay_time = loop_time_ms - (millis() - init_time);
+    // if (delay_time > 0) delay(delay_time);
 }
 
 /*
@@ -110,32 +90,36 @@ void state_init()
 {
     Serial.begin(9600);
 
-    /* Initialise ADXL345 accelerometer */
-    if(!accel.begin())
-    {
-        Serial.println("No ADXL345 detected ... Check your wiring!");
-    } else {
-        Serial.println("ADXL345 initialized.");
-        accel.setRange(ADXL345_RANGE_16_G);
-    }
+    update_altitude();
 
-    /* Initialize SD Card */
-    pinMode(10, OUTPUT); // Necessary even if chip select pin isn't used.
-
-    if (!SD.begin(chip_select)) {
-        Serial.println("Card failed, or not present");
-    } else {
-        Serial.println("SD Card initialized.");
-        file = SD.open("data.txt", FILE_WRITE); // File name <= 8 chars.
-    }
-
-    /* Initialize servo motors */
-    int pins[3] = {21, 22, 23};
-    for (i = 0; i < 3; i++)
-        servos[i].attach(pins[i]);
-
-    state = LAUNCH_STDBY;
-    loop_time_ms = 0;
+    Serial.println(curr_altitude);
+    //
+    // /* Initialise ADXL345 accelerometer */
+    // if(!accel.begin())
+    // {
+    //     Serial.println("No ADXL345 detected ... Check your wiring!");
+    // } else {
+    //     Serial.println("ADXL345 initialized.");
+    //     accel.setRange(ADXL345_RANGE_16_G);
+    // }
+    //
+    // /* Initialize SD Card */
+    // pinMode(10, OUTPUT); // Necessary even if chip select pin isn't used.
+    //
+    // if (!SD.begin(chip_select)) {
+    //     Serial.println("Card failed, or not present");
+    // } else {
+    //     Serial.println("SD Card initialized.");
+    //     file = SD.open("data.txt", FILE_WRITE); // File name <= 8 chars.
+    // }
+    //
+    // /* Initialize servo motors */
+    // int pins[3] = {21, 22, 23};
+    // for (i = 0; i < 3; i++)
+    //     servos[i].attach(pins[i]);
+    //
+    // state = LAUNCH_STDBY;
+    // loop_time_ms = 0;
 }
 
 /*
@@ -199,24 +183,24 @@ void state_liftoff()
  * positions. Exit when a current altitude is
  * less than a previous altitude (reached apogee).
  */
-void state_pwr_asc()
-{
-    update_log_all();
-
-    int ndx = init_launch_time / loop_time_ms;
-    if (ndx > 500) ndx = 500;
-    int ideal_h = table_h[ndx];
-
-    int epsilon = curr_altitude - ideal_h;
-    set_servos(get_theta(epsilon));
-
-    /* STATE CHANGE */
-    //return true if last altitude > current altitude (ie we are past apogee)
-    if (prev_altitude > curr_altitude) {
-        state = DESCENT;
-        set_servos(0);
-    }
-}
+// void state_pwr_asc()
+// {
+//     update_log_all();
+//
+//     int ndx = init_launch_time / loop_time_ms;
+//     if (ndx > 500) ndx = 500;
+//     int ideal_h = table_h[ndx];
+//
+//     int epsilon = curr_altitude - ideal_h;
+//     set_servos(get_theta(epsilon));
+//
+//     /* STATE CHANGE */
+//     //return true if last altitude > current altitude (ie we are past apogee)
+//     if (prev_altitude > curr_altitude) {
+//         state = DESCENT;
+//         set_servos(0);
+//     }
+// }
 
 /*
  * Update and log sensor values only.
@@ -245,9 +229,9 @@ void set_servos(int theta)
  */
 void update_log_all()
 {
-    accel.getEvent(&accel_event); // 2 ms max
-    update_altitude(); // 51 ms max
-    log_all(); // check s
+    accel.getEvent(&accel_event);
+    update_altitude();
+    log_all();
 }
 
 /*
@@ -280,16 +264,28 @@ boolean log_SD(char* str)
 /*
  * Updates previousAltitude and currAltitude to
  * reflect the latest info from the altimeter.
- * TIME: 50ms
+ * TODO: Test how quickly this can be called!
  */
 void update_altitude()
 {
-    Serial1.readBytesUntil('\r', alt_input, 15);
-    alt_input[15] = '\0';
-    int alt_ft = atoi(alt_input);
-    int alt_m = alt_ft * .304;
-    prev_altitude = prev_altitude;
-    curr_altitude = alt_m;
+    if (Serial1.available())
+    {
+        static char input[16];
+        static uint8_t i;
+        char c = Serial1.read();
+        if (c != '\r' && i < 15) // CR is chosen in serial monitor as line end
+            input[i++] = c;
+        else
+        {
+            input[i] = '\0';
+            i = 0;
+            int alt_ft = atoi(input);
+            int alt_m = alt_ft * .304;
+            prev_altitude = curr_altitude;
+            curr_altitude = alt_m;
+            Serial.println(millis());
+        }
+    }
 }
 
 /*
