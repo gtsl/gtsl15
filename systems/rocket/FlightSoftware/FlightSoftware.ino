@@ -56,14 +56,19 @@ const int LAUNCH_RAIL_TIME_MS = 100;
 const int MILLIS = 1000; // Milliseconds in a second, for converting from hertz to millis
 const int LAUNCH_RDY_SPEED = MILLIS / 1000; // Loop at 1000 Hz (< 3200 Hz limit)
 const int PWR_ASC_SPEED = MILLIS / 10; // Loop at 10 Hz (< 20 Hz limit)
+const int LAUNCH_DETECT_THRESHOLD = 18; // m/s^2, 2gs
+const int LAUNCH_DETECT_COUNTER_THRESHOLD = 7; // Number of times LAUNCH_DETECT_THRESHOLD must be read
+const int APOGEE_DETECT_COUNTER_THRESHOLD = 20;
 
 /* Variables */
 int loop_time_ms = LAUNCH_RDY_SPEED;
 unsigned long init_time;
 unsigned long init_launch_time;
 int curr_altitude, prev_altitude;
-int apogee_detect_amt = 0;
 char alt_input[16];
+int launch_detect_counter = 0;
+int launchTime;
+int apogee_detect_counter = 0;
 
 sensors_event_t accel_event;
 unsigned long last_led_blink = 0;
@@ -145,11 +150,22 @@ void state_launch_rdy()
     /* Update accel data only, don't worry about logging */
     accel.getEvent(&accel_event);
 
+    /* Acceleration must pass threshold 7 times to go for launch */
+    if (abs(accel_event.acceleration.y) > LAUNCH_DETECT_THRESHOLD) {
+      if (!launchDetectCounter) {
+        /* First time passing threshold, record time */
+        launchTime = millis();
+      }
+      launchDetectCounter++;
+    } else {
+      launchDetectCounter = 0;
+    }
+
     /* STATE CHANGE */
-    if (abs(accel_event.acceleration.y) > 18) {
+    if (launch_detect_counter >= LAUNCH_DETECT_COUNTER_THRESHOLD) {
         loop_time_ms = PWR_ASC_SPEED;
-        init_launch_time = millis();
-        state = PWR_ASC;
+        init_launch_time = launchTime;
+        state = LIFTOFF;
     }
 }
 
@@ -193,7 +209,7 @@ void state_pwr_asc()
      */
     if (prev_altitude > curr_altitude) {
         apogee_detect_amt++;
-        if (apogee_detect_amt == 10) {
+        if (apogee_detect_amt >= APOGEE_DETECT_COUNTER_THRESHOLD) {
             state = DESCENT;
             set_servos(0);
         }
