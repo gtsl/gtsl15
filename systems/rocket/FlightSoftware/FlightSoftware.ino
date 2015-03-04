@@ -47,22 +47,22 @@ enum states state = INIT;
 
 /* Hardware connections */
 Servo servos[3];
-Adafruit_ADXL345_Unified accel = Adafruit_ADXL345_Unified(12345); // Why is 12345 specified
-const int chip_select = 4; // Figure out what this does
+Adafruit_ADXL345_Unified accel = Adafruit_ADXL345_Unified(12345);
+const int chip_select = 4;
 const int led_pin = 17;
 
 /* Constants */
 const int LAUNCH_RAIL_TIME_MS = 100;
 const int MILLIS = 1000; // Milliseconds in a second, for converting from hertz to millis
-const int LAUNCH_RDY_SPEED = MILLIS / 1000; // Loop at 1000 Hz
-const int PWR_ASC_SPEED = MILLIS / 20; // Loop at 20 Hz
+const int LAUNCH_RDY_SPEED = MILLIS / 1000; // Loop at 1000 Hz (< 3200 Hz limit)
+const int PWR_ASC_SPEED = MILLIS / 10; // Loop at 10 Hz (< 20 Hz limit)
 
 /* Variables */
-int i;
 int loop_time_ms = LAUNCH_RDY_SPEED;
 unsigned long init_time;
 unsigned long init_launch_time;
 int curr_altitude, prev_altitude;
+int apogee_detect_amt = 0;
 char alt_input[16];
 
 sensors_event_t accel_event;
@@ -128,7 +128,7 @@ void state_init()
 
     /* Initialize servo motors */
     int pins[3] = {21, 22, 23};
-    for (i = 0; i < 3; i++)
+    for (int i = 0; i < 3; i++)
         servos[i].attach(pins[i]);
 
     state = LAUNCH_RDY;
@@ -187,10 +187,16 @@ void state_pwr_asc()
     set_servos(get_theta(epsilon));
 
     /* STATE CHANGE */
-    //return true if last altitude > current altitude (ie we are past apogee)
+    /*
+     * Change only if prev_altitude > curr_altitude for at least 10 times,
+     * this is to reduce the chance of a false reading
+     */
     if (prev_altitude > curr_altitude) {
-        state = DESCENT;
-        set_servos(0);
+        apogee_detect_amt++;
+        if (apogee_detect_amt == 10) {
+            state = DESCENT;
+            set_servos(0);
+        }
     }
 }
 
@@ -212,7 +218,7 @@ void set_servos(int theta)
     else if (theta < 0)
         theta = 0;
     int pos = 160 - theta;
-    for (i = 0; i < 3; i++)
+    for (int i = 0; i < 3; i++)
         servos[i].write(pos);
 }
 
@@ -237,6 +243,7 @@ void log_all()
         millis() - init_launch_time, accel_event.acceleration.x,
         accel_event.acceleration.y, accel_event.acceleration.z,
         curr_altitude);
+    file.println(buf);
 }
 
 /*
@@ -254,17 +261,25 @@ boolean log_SD(char* str)
 }
 
 /*
- * Updates previousAltitude and currAltitude to
+ * Updates previous_altitude and curr_altitude to
  * reflect the latest info from the altimeter.
- * TIME: 50ms
+ * TIME: 50ms (20 Hz)
  */
 void update_altitude()
 {
-    Serial1.readBytesUntil('\r', alt_input, 15);
-    alt_input[15] = '\0';
+    int j = 0;
+    char c = Serial1.read();
+    while (c != '\r' && j < 16) // get chars until c == '\r';
+    {
+        alt_input[j] = c;
+        c = Serial1.read();
+        j++;
+    }
+    alt_input[j] = '\0';
+    Serial.read(); // Read to get rid of LR in <CR><LR>
     int alt_ft = atoi(alt_input);
     int alt_m = alt_ft * .304;
-    prev_altitude = prev_altitude;
+    prev_altitude = curr_altitude;
     curr_altitude = alt_m;
 }
 
