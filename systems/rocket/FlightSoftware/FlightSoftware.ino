@@ -152,14 +152,12 @@ void state_launch_rdy()
 
     /* Acceleration must pass threshold 7 times to go for launch */
     if (abs(accel_event.acceleration.y) > LAUNCH_DETECT_THRESHOLD) {
-      if (!launchDetectCounter) {
+      if (!launch_detect_counter) {
         /* First time passing threshold, record time */
         launchTime = millis();
       }
-      launchDetectCounter++;
-    } else {
-      launchDetectCounter = 0;
-    }
+      launch_detect_counter++;
+  } else launch_detect_counter = 0;
 
     /* STATE CHANGE */
     if (launch_detect_counter >= LAUNCH_DETECT_COUNTER_THRESHOLD) {
@@ -208,12 +206,12 @@ void state_pwr_asc()
      * this is to reduce the chance of a false reading
      */
     if (prev_altitude > curr_altitude) {
-        apogee_detect_amt++;
-        if (apogee_detect_amt >= APOGEE_DETECT_COUNTER_THRESHOLD) {
+        apogee_detect_counter++;
+        if (apogee_detect_counter >= APOGEE_DETECT_COUNTER_THRESHOLD) {
             state = DESCENT;
             set_servos(0);
         }
-    }
+    } else apogee_detect_counter = 0;
 }
 
 /*
