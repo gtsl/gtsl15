@@ -34,16 +34,14 @@ MAKE_TYPE_INFO( short )
 
 enum states
 {
-    INIT,             /* Initalize avionics, error check and report */
-    LAUNCH_STDBY,     /* Unarmed on launchpad */
     LAUNCH_RDY,       /* Armed on launchpad */
     LIFTOFF,          /* Powered flight until clear of launch rail */
     PWR_ASC,          /* Powered flight */
     DESCENT           /* Descent with drogue deployed */
 };
 
-/* Boot into INIT state */
-enum states state = INIT;
+/* Boot into LAUNCH_RDY state */
+enum states state = LAUNCH_RDY;
 
 /* Hardware connections */
 Servo servos[3];
@@ -62,29 +60,48 @@ const int APOGEE_DETECT_COUNTER_THRESHOLD = 20;
 
 /* Variables */
 int loop_time_ms = LAUNCH_RDY_SPEED;
-unsigned long init_time;
+unsigned long last_time;
 unsigned long init_launch_time;
 int curr_altitude, prev_altitude;
 char alt_input[16];
+int alt_input_index = 0;
 int launch_detect_counter = 0;
-int launchTime;
+int launch_time;
 int apogee_detect_counter = 0;
+boolean alt_updated = false;
 
 sensors_event_t accel_event;
 unsigned long last_led_blink = 0;
 bool last_on = 0;
 File file;
-unsigned long logs = 0;
 
+
+/*
+ * Initialize accelerometer, SD card and servo motors.
+ * Report errors to serial
+ * (Altimeter doesn't need to be initialized, may need
+ * to put in error check for it)
+ */
 void setup()
 {
-  Serial.begin(9600);
-  while (!Serial) {
-    ; // wait for serial port to connect.
-  }
-  
-  
-  /* Initialize SD Card */
+    Serial.begin(9600);
+    Serial1.begin(9600); // Altimeter Serial
+    
+    while (!Serial) {
+      ;
+    }
+    
+    digitalWrite(led_pin, HIGH);
+    /* Initialise ADXL345 accelerometer */
+    //if(!accel.begin())
+    //{
+    //    Serial.println("No ADXL345 detected ... Check your wiring!");
+    //} else {
+    //    Serial.println("ADXL345 initialized.");
+    //    accel.setRange(ADXL345_RANGE_16_G);
+    //}
+
+    /* Initialize SD Card */
     pinMode(10, OUTPUT); // Necessary even if chip select pin isn't used.
 
     if (!SD.begin(chip_select)) {
@@ -93,75 +110,43 @@ void setup()
         Serial.println("SD Card initialized.");
         file = SD.open("data.txt", FILE_WRITE); // File name <= 8 chars.
     }
+
+    /* Initialize servo motors */
+    int pins[3] = {21, 22, 23};
+    for (int i = 0; i < 3; i++)
+        servos[i].attach(pins[i]);
+
+    state = LAUNCH_RDY;
+    loop_time_ms = 0;
 }
 
 void loop()
 {
-    init_time = millis();
-
-
-    log_all();
-
-    //if (millis() - init_time > 50)
-      Serial.println(millis() - init_time);
-//    switch (state) {
-//    case INIT:
-//        state_init();
-//        break;
-//    case LAUNCH_RDY:
-//        state_launch_rdy();
-//        break;
-//    case LIFTOFF:
-//        state_liftoff();
-//        break;
-//    case PWR_ASC:
-//        state_pwr_asc();
-//        break;
-//    }
-}
-
-/*
- * Initialize accelerometer, SD card and servo motors.
- * Report errors to serial
- * (Altimeter doesn't need to be initialized, may need
- * to put in error check for it)
- */
-void state_init()
-{
-//    Serial.begin(9600);
-//
-//    /* Initialise ADXL345 accelerometer */
-//    if(!accel.begin())
-//    {
-//        Serial.println("No ADXL345 detected ... Check your wiring!");
-//    } else {
-//        Serial.println("ADXL345 initialized.");
-//        accel.setRange(ADXL345_RANGE_16_G);
-//    }
-//
-//    /* Initialize SD Card */
-//    pinMode(10, OUTPUT); // Necessary even if chip select pin isn't used.
-//
-//    if (!SD.begin(chip_select)) {
-//        Serial.println("Card failed, or not present");
-//    } else {
-//        Serial.println("SD Card initialized.");
-//        file = SD.open("data.txt", FILE_WRITE); // File name <= 8 chars.
-//    }
-//
-//    /* Initialize servo motors */
-//    int pins[3] = {21, 22, 23};
-//    for (int i = 0; i < 3; i++)
-//        servos[i].attach(pins[i]);
-//
-//    state = LAUNCH_RDY;
-//    loop_time_ms = 0;
+    if (millis() - last_time > loop_time_ms) {
+        switch (state) {
+        case LAUNCH_RDY:
+            //state_launch_rdy();
+            log_all();
+            break;
+        case LIFTOFF:
+            state_liftoff();
+            break;
+        case PWR_ASC:
+            state_pwr_asc();
+            break;
+        case DESCENT:
+            state_descent();
+            break;
+        }
+        last_time = millis();
+    }
+    alt_updated = update_altitude(); // This is called every loop to make sure we don't lose data
 }
 
 /*
  * Loop as fast as we can get accelerometer readings.
- * When we detect an upwards acceleration (maybe filter
- * a bit?) go into liftoff state.
+ * When we detect an upwards acceleration, go into 
+ * liftoff state.
  */
 void state_launch_rdy()
 {
@@ -172,7 +157,7 @@ void state_launch_rdy()
     if (abs(accel_event.acceleration.y) > LAUNCH_DETECT_THRESHOLD) {
       if (!launch_detect_counter) {
         /* First time passing threshold, record time */
-        launchTime = millis();
+        launch_time = millis();
       }
       launch_detect_counter++;
   } else launch_detect_counter = 0;
@@ -180,7 +165,7 @@ void state_launch_rdy()
     /* STATE CHANGE */
     if (launch_detect_counter >= LAUNCH_DETECT_COUNTER_THRESHOLD) {
         loop_time_ms = PWR_ASC_SPEED;
-        init_launch_time = launchTime;
+        init_launch_time = launch_time;
         state = LIFTOFF;
     }
 }
@@ -191,7 +176,8 @@ void state_launch_rdy()
  */
 void state_liftoff()
 {
-    update_log_all();
+    accel.getEvent(&accel_event);
+    log_all();
 
     /* STATE CHANGE */
     if (millis() - init_launch_time > LAUNCH_RAIL_TIME_MS) {
@@ -209,27 +195,32 @@ void state_liftoff()
  */
 void state_pwr_asc()
 {
-    update_log_all();
+    accel.getEvent(&accel_event);
+    log_all();
 
-    int ndx = init_launch_time / loop_time_ms;
-    if (ndx > 500) ndx = 500;
-    int ideal_h =0;
-
-    int epsilon = curr_altitude - ideal_h;
-    set_servos(get_theta(epsilon));
-
-    /* STATE CHANGE */
-    /*
-     * Change only if prev_altitude > curr_altitude for at least 10 times,
-     * this is to reduce the chance of a false reading
-     */
-    if (prev_altitude > curr_altitude) {
-        apogee_detect_counter++;
-        if (apogee_detect_counter >= APOGEE_DETECT_COUNTER_THRESHOLD) {
-            state = DESCENT;
-            set_servos(0);
-        }
-    } else apogee_detect_counter = 0;
+    if (alt_updated) {
+        alt_updated = false;
+        int ndx = init_launch_time / loop_time_ms;
+        if (ndx > 500) ndx = 500;
+        //int ideal_h = table_h[ndx];
+        int ideal_h = 0;
+    
+        int epsilon = curr_altitude - ideal_h;
+        set_servos(get_theta(epsilon));
+    
+        /* STATE CHANGE */
+        /*
+         * Change only if prev_altitude > curr_altitude for at least 10 times,
+         * this is to reduce the chance of a false reading
+         */
+        if (prev_altitude > curr_altitude) {
+            apogee_detect_counter++;
+            if (apogee_detect_counter >= APOGEE_DETECT_COUNTER_THRESHOLD) {
+                state = DESCENT;
+                set_servos(0);
+            }
+        } else apogee_detect_counter = 0;
+    }
 }
 
 /*
@@ -237,7 +228,8 @@ void state_pwr_asc()
  */
 void state_descent()
 {
-    update_log_all();
+    accel.getEvent(&accel_event);
+    log_all();
 }
 
 /* Subroutines */
@@ -255,55 +247,57 @@ void set_servos(int theta)
 }
 
 /*
- * Update accelerometer and altimeter and log all information.
- */
-void update_log_all()
-{
-    accel.getEvent(&accel_event); // 2 ms max
-    update_altitude(); // 51 ms max
-    log_all(); // check s
-}
-
-/*
  * Log information from time, accelerometer event, and whatever
  * is in the currAltitude variable.
  */
 void log_all()
 {
-    init_launch_time = 1000;
-    char buf[50];
-    sprintf(buf, "T: %Lu, Ac: %f, %f, %f, Al: %f",
-        millis() - init_launch_time, 10,
-        10, 10, 5);
-    file.println(buf);
-    
-    if (logs++ >= 100) {
-       file.flush();
-       logs = 0; 
+    if (file) {
+        String data_str = "T: ";
+        data_str += millis() - init_launch_time;
+        data_str += ", Ac: ";
+        //data_str += accel_event.acceleration.x;
+        data_str += 10;
+        data_str += ", ";
+        //data_str += accel_event.acceleration.y;
+        data_str += 20;
+        data_str += ", ";
+        //data_str += accel_event.acceleration.z;
+        data_str += 30;
+        data_str += ", Al: ";
+        data_str += curr_altitude;
+        file.println(data_str);
+        file.flush();
     }
 }
 
 /*
  * Updates previous_altitude and curr_altitude to
- * reflect the latest info from the altimeter.
- * TIME: 50ms (20 Hz)
+ * reflect the latest info from the altimeter. Return true
+ * whenever altitude was updated.
+ * THIS MUST BE CALLED AS FAST AS POSSIBLE
  */
-void update_altitude()
+boolean update_altitude()
 {
-    int j = 0;
-    char c = Serial1.read();
-    while (c != '\r' && j < 16) // get chars until c == '\r';
-    {
-        alt_input[j] = c;
-        c = Serial1.read();
-        j++;
+    if (Serial1.available()) {
+        char c = Serial1.read();
+        if (c != '\r' && alt_input_index < 15)
+            alt_input[alt_input_index++] = c;
+        else
+        {
+            alt_input[alt_input_index] = '\0';
+            alt_input_index = 0;
+            int alt_ft = atoi(alt_input);
+            int alt_m = alt_ft * .304;
+            prev_altitude = curr_altitude;
+            curr_altitude = alt_m;
+            //Serial.println(alt_ft);
+            //Serial.println(curr_altitude);
+            Serial.println(curr_altitude);
+            return true;
+        }
     }
-    alt_input[j] = '\0';
-    Serial.read(); // Read to get rid of LR in <CR><LR>
-    int alt_ft = atoi(alt_input);
-    int alt_m = alt_ft * .304;
-    prev_altitude = curr_altitude;
-    curr_altitude = alt_m;
+    return false;
 }
 
 /*
