@@ -46,8 +46,8 @@ enum states state = LAUNCH_RDY;
 /* Hardware connections */
 Servo servos[3];
 Adafruit_ADXL345_Unified accel = Adafruit_ADXL345_Unified(12345);
-const int chip_select = 4;
-const int led_pin = 17;
+const int chip_select = 10;
+const int led_pin = 7;
 
 /* Constants */
 const int LAUNCH_RAIL_TIME_MS = 100;
@@ -85,27 +85,26 @@ File file;
 void setup()
 {
     Serial.begin(9600);
+    
     Serial1.begin(9600); // Altimeter Serial
-    
-    while (!Serial) {
-      ;
-    }
-    
+    pinMode(led_pin, OUTPUT);
     digitalWrite(led_pin, HIGH);
     /* Initialise ADXL345 accelerometer */
-    //if(!accel.begin())
-    //{
-    //    Serial.println("No ADXL345 detected ... Check your wiring!");
-    //} else {
-    //    Serial.println("ADXL345 initialized.");
-    //    accel.setRange(ADXL345_RANGE_16_G);
-    //}
+    if(!accel.begin())
+    {
+        Serial.println("No ADXL345 detected ... Check your wiring!");
+        //digitalWrite(led_pin, LOW);
+    } else {
+        Serial.println("ADXL345 initialized.");
+        accel.setRange(ADXL345_RANGE_16_G);
+    }
 
     /* Initialize SD Card */
-    pinMode(10, OUTPUT); // Necessary even if chip select pin isn't used.
+    pinMode(chip_select, OUTPUT); // Necessary even if chip select pin isn't used.
 
     if (!SD.begin(chip_select)) {
         Serial.println("Card failed, or not present");
+        //digitalWrite(led_pin, LOW);
     } else {
         Serial.println("SD Card initialized.");
         file = SD.open("data.txt", FILE_WRITE); // File name <= 8 chars.
@@ -118,6 +117,7 @@ void setup()
 
     state = LAUNCH_RDY;
     loop_time_ms = 0;
+    
 }
 
 void loop()
@@ -126,6 +126,7 @@ void loop()
         switch (state) {
         case LAUNCH_RDY:
             //state_launch_rdy();
+            accel.getEvent(&accel_event);
             log_all();
             break;
         case LIFTOFF:
@@ -237,13 +238,16 @@ void state_descent()
 void set_servos(int theta)
 {
     // 0->160 , 110->50
-    if (theta > 90)
-        theta = 90;
-    else if (theta < 0)
-        theta = 0;
-    int pos = 160 - theta;
-    for (int i = 0; i < 3; i++)
-        servos[i].write(pos);
+     
+//    if (theta > 80)
+//        theta = 80;
+//    else if (theta < 10)
+//        theta = 10;
+//    int pos = 25 + theta;
+//    for (int i = 0; i < 3; i++)
+//        servos[i].write(pos);
+      for (int i = 0; i < 3; i++)
+          servos[i].write(theta);
 }
 
 /*
@@ -256,19 +260,21 @@ void log_all()
         String data_str = "T: ";
         data_str += millis() - init_launch_time;
         data_str += ", Ac: ";
-        //data_str += accel_event.acceleration.x;
-        data_str += 10;
+        data_str += accel_event.acceleration.x;
         data_str += ", ";
-        //data_str += accel_event.acceleration.y;
-        data_str += 20;
+        data_str += accel_event.acceleration.y;
         data_str += ", ";
-        //data_str += accel_event.acceleration.z;
-        data_str += 30;
+        data_str += accel_event.acceleration.z;
         data_str += ", Al: ";
         data_str += curr_altitude;
-        file.println(data_str);
-        file.flush();
+        data_str += ", St: ";
+        data_str += state;
+      
+      file.println(data_str);
+      file.flush();
+      Serial.println(data_str);
     }
+    
 }
 
 /*
@@ -291,9 +297,6 @@ boolean update_altitude()
             int alt_m = alt_ft * .304;
             prev_altitude = curr_altitude;
             curr_altitude = alt_m;
-            //Serial.println(alt_ft);
-            //Serial.println(curr_altitude);
-            Serial.println(curr_altitude);
             return true;
         }
     }
