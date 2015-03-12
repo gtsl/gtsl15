@@ -15,7 +15,7 @@
 #include <SD.h>
 #include <Adafruit_Sensor.h>
 #include <Adafruit_ADXL345_U.h>
-#include "tables.h"
+//#include "tables.h"
 
 // Generic catch-all implementation.
 template <typename T_ty> struct TypeInfo { static const char * name; };
@@ -46,17 +46,18 @@ enum states state = LAUNCH_RDY;
 /* Hardware connections */
 Servo servos[3];
 Adafruit_ADXL345_Unified accel = Adafruit_ADXL345_Unified(12345);
-const int chip_select = 4;
-const int led_pin = 17;
+const int chip_select = 10;
+const int led_pin = 7;
 
 /* Constants */
 const int LAUNCH_RAIL_TIME_MS = 100;
 const int MILLIS = 1000; // Milliseconds in a second, for converting from hertz to millis
 const int LAUNCH_RDY_SPEED = MILLIS / 1000; // Loop at 1000 Hz (< 3200 Hz limit)
-const int PWR_ASC_SPEED = MILLIS / 10; // Loop at 10 Hz (< 20 Hz limit)
+const int PWR_ASC_SPEED = MILLIS / 20; // Loop at 10 Hz (< 20 Hz limit)
 const int LAUNCH_DETECT_THRESHOLD = 18; // m/s^2, 2gs
 const int LAUNCH_DETECT_COUNTER_THRESHOLD = 7; // Number of times LAUNCH_DETECT_THRESHOLD must be read
 const int APOGEE_DETECT_COUNTER_THRESHOLD = 20;
+const int THETA_MAX = 80;
 
 /* Variables */
 int loop_time_ms = LAUNCH_RDY_SPEED;
@@ -69,6 +70,7 @@ int launch_detect_counter = 0;
 int launch_time;
 int apogee_detect_counter = 0;
 boolean alt_updated = false;
+unsigned long last_log = 0;
 
 sensors_event_t accel_event;
 unsigned long last_led_blink = 0;
@@ -86,22 +88,24 @@ void setup()
 {
     Serial.begin(9600);
     Serial1.begin(9600); // Altimeter Serial
-
+    pinMode(led_pin, OUTPUT);
     digitalWrite(led_pin, HIGH);
     /* Initialise ADXL345 accelerometer */
     if(!accel.begin())
     {
         Serial.println("No ADXL345 detected ... Check your wiring!");
+        digitalWrite(led_pin, LOW);
     } else {
         Serial.println("ADXL345 initialized.");
         accel.setRange(ADXL345_RANGE_16_G);
     }
 
     /* Initialize SD Card */
-    pinMode(10, OUTPUT); // Necessary even if chip select pin isn't used.
+    pinMode(chip_select, OUTPUT); // Necessary even if chip select pin isn't used.
 
     if (!SD.begin(chip_select)) {
         Serial.println("Card failed, or not present");
+        digitalWrite(led_pin, LOW);
     } else {
         Serial.println("SD Card initialized.");
         file = SD.open("data.txt", FILE_WRITE); // File name <= 8 chars.
@@ -140,16 +144,22 @@ void loop()
 
 /*
  * Loop as fast as we can get accelerometer readings.
- * When we detect an upwards acceleration, go into 
+ * When we detect an upwards acceleration, go into
  * liftoff state.
  */
 void state_launch_rdy()
 {
-    /* Update accel data only, don't worry about logging */
+    /* Update accel data */
     accel.getEvent(&accel_event);
+    
+    /* Log just in case we don't change state or something weird */
+    if (millis() - last_log >= 50) {
+        log_all();
+        last_log = millis();
+    }
 
     /* Acceleration must pass threshold 7 times to go for launch */
-    if (abs(accel_event.acceleration.y) > LAUNCH_DETECT_THRESHOLD) {
+    if (abs(accel_event.acceleration.x) > LAUNCH_DETECT_THRESHOLD) {
       if (!launch_detect_counter) {
         /* First time passing threshold, record time */
         launch_time = millis();
@@ -162,6 +172,7 @@ void state_launch_rdy()
         loop_time_ms = PWR_ASC_SPEED;
         init_launch_time = launch_time;
         state = LIFTOFF;
+        digitalWrite(led_pin, LOW);
     }
 }
 
@@ -177,7 +188,7 @@ void state_liftoff()
     /* STATE CHANGE */
     if (millis() - init_launch_time > LAUNCH_RAIL_TIME_MS) {
         /* Extend servos to nominal position */
-        set_servos(35);
+        set_servos(35); // Needs to be changes?
         state = PWR_ASC;
     }
 }
@@ -195,13 +206,14 @@ void state_pwr_asc()
 
     if (alt_updated) {
         alt_updated = false;
-        int ndx = init_launch_time / loop_time_ms;
+        int flight_time = millis() - init_launch_time;
+        int ndx = flight_time / delta_time;
         if (ndx > 500) ndx = 500;
         int ideal_h = table_h[ndx];
-    
+
         int epsilon = curr_altitude - ideal_h;
         set_servos(get_theta(epsilon));
-    
+
         /* STATE CHANGE */
         /*
          * Change only if prev_altitude > curr_altitude for at least 10 times,
@@ -230,12 +242,11 @@ void state_descent()
 
 void set_servos(int theta)
 {
-    // 0->160 , 110->50
-    if (theta > 90)
-        theta = 90;
+    if (theta > THETA_MAX)
+        theta = THETA_MAX;
     else if (theta < 0)
         theta = 0;
-    int pos = 160 - theta;
+    int pos = 25 + theta;
     for (int i = 0; i < 3; i++)
         servos[i].write(pos);
 }
@@ -257,7 +268,9 @@ void log_all()
         data_str += accel_event.acceleration.z;
         data_str += ", Al: ";
         data_str += curr_altitude;
-      
+        data_str += ", St: ";
+        data_str += state;
+        
       file.println(data_str);
       file.flush();
     }
@@ -300,7 +313,7 @@ int get_theta(double eps)
     if (abs(eps) <= 0.5)
         theta = 35;
     else if (eps >= 0)
-        theta = 90;
+        theta = THETA_MAX;
     else if (eps < 0)
         theta = 0;
     return theta;
