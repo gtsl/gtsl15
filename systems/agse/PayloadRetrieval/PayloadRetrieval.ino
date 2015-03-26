@@ -7,8 +7,8 @@ Servo s2;
 Servo s3;
 Servo s4;
 Servo s5;
-//Servo s6;
-//Servo s7;
+Servo s6;
+Servo s7; //25-160
 
 
 //int a0 = 0;
@@ -23,13 +23,14 @@ int axis;
     Joint_4: 4  */
 
 void setup() {
-  s1.attach(11); //joint 1
-  s2.attach(10); //joint 2 
-  s3.attach(9);  //joint 3
+  s1.attach(3); //joint 1
+  s2.attach(4); //joint 2 
+  s3.attach(5);  //joint 3
   
   s4.attach(6);   //joint 4
-  s5.attach(5);   //joint 5
-  
+  s5.attach(7);   //joint 5
+  s6.attach(8);   //spinner
+  s7.attach(10);   //manipulator  
   
   //servoWrite(1,135);
   //servoWrite(0,90);
@@ -90,10 +91,16 @@ void servoWrite(int axis, int pos) {
     //z_axis
     case 4:
       s4.write(pos);
+
       break;
-    //gripper
     case 5:
       s5.write(pos);
+      break;
+    case 6:
+      s6.write(pos);
+      break;
+    case 7:
+      s7.write(pos);
       break;
   }
 }
