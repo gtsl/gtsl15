@@ -35,19 +35,16 @@ function xdot = accel(x, Cd_r, A_r, A_ats)
 % Given parameters
 Cd_ats = 1.7;
 m = 1;
-ft2m = 0.3048; m2ft = 1 / ft2m;
+
 xdot = zeros(2,1);
 
 % hdot = hdot
 xdot(1) = x(2);
-% Sum forces in metric:
 % hddot = F / m, F = D_r + D_ats
-[T, A, P, rho] = atmosisa(x(1) * ft2m);
+rho = 
 Q = .5 * rho * xdot(1) ^ 2;
-D_r = Q * A_r * Cd_r;
-D_ats = Q * A_ats * Cd_ats;
-hddot = (D_r + D_ats) / m;
-% Back to ft/s2 for return
-xdot(2) = hddot * m2ft;
-
+x
+Cd_r
+A_r
+A_ats
 end
