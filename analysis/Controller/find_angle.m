@@ -25,11 +25,16 @@ baseTable = ...
 85	0.5466	1.6398;...
 90	0.5512	1.6536];
 
-% Interpolate table with only angle and total area
-table = interp1(baseTable(:,1), baseTable(:,3), 0:1:90);
-table = [0:1:90; table]';
-% Get angle for value closest to area
-[~, ndx] = min(abs(table(:,2) - area));
-angle = table(ndx, 1);
+totalArea = baseTable(:,3);
+angleData = baseTable(:,1);
+
+if totalArea < area
+    angle = 90; % degree
+else
+    angle = interp1(totalArea,angleData,area);
+    if angle < 0
+        angle = 0;
+    end
+end
 
 end
