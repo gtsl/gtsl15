@@ -1,12 +1,4 @@
-/*
- * MotorKnob
- *
- * A stepper motor follows the turns of a potentiometer
- * (or other sensor) on analog input 0.
- *
- * http://www.arduino.cc/en/Reference/Stepper
- * This example code is in the public domain.
- */
+
 
 #include <Stepper.h>
 
@@ -23,18 +15,17 @@ int previous = 0;
 
 void setup()
 {
-  // set the speed of the motor to 30 RPMs
+  // set the speed of the motor to 30 RPMs (depending on IIS/VES)
   stepper.setSpeed(30);
 }
 
 void loop()
 {
-  // get the sensor value
+  // get the original sensor value
   int val = analogRead(0);
 
-  // move a number of steps equal to the change in the
-  // sensor reading
-  stepper.step(val - previous);
+  // Hardcode the number of steps X (depending on IIS/VES)
+  stepper.step(X);
 
   // remember the previous value of the sensor
   previous = val;
