@@ -28,7 +28,9 @@ baseTable = ...
 totalArea = baseTable(:,3);
 angleData = baseTable(:,1);
 
-if totalArea < area
+if area < 0
+    angle = 0;
+elseif totalArea < area
     angle = 90; % degree
 else
     angle = interp1(totalArea,angleData,area);
