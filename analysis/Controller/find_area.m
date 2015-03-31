@@ -9,50 +9,7 @@ function A_ats = find_area(h, hdot)
 global x
 x = [h, hdot]';
 
-A_ats = fsolve(@apogee, 1)
-
-% apogee(-10)
-% % State being iterated
-% x_i = [h; hdot];
-% % Initalize error variable and initial guess of area
-% error = 10; A_ats = 1; A_ats_max = 1.6536;
-% % Iteration counter and iteration limit
-% maxIter = 100; i = 1;
-% % Holder for last values
-% A_ats_l = A_ats; x_f_l = x_i;
-% % Search for area S.T error is minimized
-% errorVec = zeros(1,maxIter);
-% while and(abs(error) > 1, i < maxIter)
-%     
-%     x_f = integrate(x_i, A_ats);
-%     % If A_ats < 0 or A_ats > A_ats_max, break
-%     if and(x_f(1) > 3000, A_ats > A_ats_max)
-%         A_ats = A_ats_max;
-%         return
-%     end
-%     if and(x_f(1) < 3000, A_ats < 0)
-%         A_ats = 0;
-%         return
-%     end
-%     % If hdot at 3000 ft > 0, increase A_ats
-%     % If hdot at 3000 ft < 0, decrease A_ats
-%     
-%     % NOT WORKING AT ALL
-%     
-% %     if x_f(1) > 3000
-% %         A_ats = A_ats + 0.05;
-% %     else
-% %         A_ats = A_ats - 0.05;
-% %     end
-%     A_ats = A_ats + 0.25 * (x_f(1) - 3000);
-%     A_ats_l = A_ats; x_f_l = x_f;
-%     
-%     error = x_f(1) - 3000;
-%     errorVec(i) = error;
-%     i = i + 1;
-% end
-% 
-% plot(errorVec)
+A_ats = fsolve(@apogee, 1, optimoptions('fsolve','Display','off'));
 
 end
 
@@ -64,7 +21,8 @@ global x
 
 % Include A_ats in state
 xvec = [x; A_ats];
-options = odeset('Events', @events);
+warning('off', 'MATLAB:ode45:IntegrationTolNotMet');
+options = odeset('Events', @events, 'RelTol', 1e-3, 'AbsTol', 1e-3);
 [~, YOUT] = ode45(@accel, [0 10], xvec, options);
 
 % Return errror in apogee
