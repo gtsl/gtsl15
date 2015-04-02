@@ -133,6 +133,9 @@ void loop()
         case PWR_ASC:
             state_pwr_asc();
             break;
+        case UNPWR_ASC:
+            state_unpwr_asc();
+            break;
         case DESCENT:
             state_descent();
             break;
@@ -151,7 +154,7 @@ void state_launch_rdy()
 {
     /* Update accel data */
     accel.getEvent(&accel_event);
-    
+
     /* Log just in case we don't change state or something weird */
     if (millis() - last_log >= 50) {
         log_all();
@@ -229,6 +232,10 @@ void state_pwr_asc()
     }
 }
 
+void state_unpwr_asc()
+{
+
+}
 /*
  * Update and log sensor values only.
  */
@@ -239,6 +246,16 @@ void state_descent()
 }
 
 /* Subroutines */
+
+/*
+ * Kalman filter estimates altitude and vertical velocity from measured
+ * altitude and acceleration in the vertical direction. Function includes
+ * error handing for probable failure in either measurement.
+ */
+void kf(int h_meas, float a_meas, int *xvec_est)
+{
+    
+}
 
 void set_servos(int theta)
 {
@@ -270,7 +287,7 @@ void log_all()
         data_str += curr_altitude;
         data_str += ", St: ";
         data_str += state;
-        
+
       file.println(data_str);
       file.flush();
     }
