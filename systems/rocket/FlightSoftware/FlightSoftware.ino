@@ -83,6 +83,66 @@ unsigned long last_led_blink = 0;
 bool last_on = 0;
 File file;
 
+// KALMAN FILTER VARIABLES
+// double ** P_Kalman;// = new double*[2];
+// double ** R_Kalman;// = new double*[2];
+// double ** Q_Kalman;// = new double*[2];
+double P_Kalman[2][2];// = new double*[2];
+double R_Kalman[2][2];// = new double*[2];
+double Q_Kalman[2][2];// = new double*[2];
+double ** A;// = new double*[2];
+double ** Atr;// = new double*[2];
+double ** B;// = new double*[2];
+double ** x_minus;// = new double*[2];
+double ** x_est;// = new double*[2];
+double ** P_minus;// = new double*[2];
+double ** K;// = new double*[2];
+double ** temp1;// = new double*[2];
+double ** temp2;// = new double*[2];
+double ** temp3;// = new double*[2];
+double ** temp4;// = new double*[2];
+double ** temp5;// = new double*[2];
+double ** temp6;// = new double*[2];
+double ** temp7;// = new double*[2];
+double ** temp8;// = new double*[2];
+double ** inv_temp;// = new double*[2];
+
+for (int i=0;i<2;i++) {
+    P_Kalman[i] = new double[2];
+	R_Kalman[i] = new double[2];
+	Q_Kalman[i] = new double[2];
+	A[i] = new double[2];
+	Atr[i] = new double[2];
+	B[i] = new double[1];
+	x_minus[i] = new double[1];
+	x_est[i] = new double[1];
+	P_minus[i] = new double[2];
+	K[i] = new double[2];
+	temp1[i] = new double[2];
+	temp2[i] = new double[2];
+	temp3[i] = new double[2];
+	temp4[i] = new double[2];
+	temp5[i] = new double[1];
+	temp6[i] = new double[1];
+	temp7[i] = new double[1];
+	temp8[i] = new double[1];
+	inv_temp[i] = new double*[2];
+}
+
+R_Kalman[0][0] = 80.0*80.0;
+R_Kalman[1][1] = 140.0*140.0;
+R_Kalman[0][1] = 0.0;
+R_Kalman[1][0] = 0.0;
+Q_Kalman[0][0] = 0.0;
+Q_Kalman[1][1] = 30.0*30.0;
+Q_Kalman[0][1] = 0.0;
+Q_Kalman[1][0] = 0.0;
+P_Kalman[0][0] = 1.0*1.0;
+P_Kalman[1][1] = 1.0*1.0;
+P_Kalman[0][1] = 0.0;
+P_Kalman[1][0] = 0.0;
+// END KALMAN FILTER VARIABLES
+
 
 /*
  * Initialize accelerometer, SD card and servo motors.
@@ -314,14 +374,62 @@ void state_descent()
 /* Subroutines */
 
 /*
- * Kalman filter estimates altitude and vertical velocity from measured
- * altitude and acceleration in the vertical direction. Function includes
- * error handing for probable failure in either measurement.
- */
-void kf(int h_meas, float a_meas, int *xvec_est)
+* Kalman filter estimates altitude and vertical velocity from measured
+* altitude and acceleration in the vertical direction. Function includes
+* error handing for probable failure in either measurement.
+*/
+//KALMAN FILTER FUNCTION
+void kf(int h_meas, int h_meas_prev, float a_meas, double **xvec_est,
+    double timestep)
 {
+	// Recalculate A & B matrices
+	A[0][0] = 1.0;
+	A[1][1] = 1.0;
+	A[0][1] = timestep;
+	A[1][0] = 0.0;
+	B[0][0] = 0.0;
+	B[1][0] = timestep;
+
+	double v_meas = (h_meas - h_meas_prev)/timestep;
+
+	/* KALMAN ALGORITHM:
+	x_minus = A*x_est(:,i) + B*u(i+1);
+    P_minus = A*P_Kalman*A' + Q;
+    K = P_minus*inv(P_minus + R);
+    x_est(:,i+1) = x_minus + K*([h_act(i+1);v_act(i+1)] - x_minus);
+    P_Kalman = (eye(2) - K)*P_minus;*/
+
+	matMultiplication(2, 2, A, 2, 1, xvec_est, temp5);
+	matScaleMultiplication(2, 1, B, a_meas, temp6);
+	matSum(2, 1, temp5, temp6, x_minus);
+
+	matMultiplication(2, 2, A, 2, 2, P_Kalman, temp1);
+	transpose(2, 2, A, Atr);
+	matMultiplication(2, 2, temp1, 2, 2, Atr, temp2);
+	matSum(2, 2, temp2, Q_Kalman, P_minus);
+
+	matSum(2, 2, P_minus, R_Kalman, temp3);
+	mat2Inverse(temp3, inv_temp);
+	matMultiplication(2, 2, P_minus, 2, 2, inv_temp, K);
+
+	temp7[0][0] = h_meas;
+	temp7[1][0] = v_meas;
+	matScaleMultiplication(2, 1, x_minus, -1, temp8);
+	matSum(2, 1, temp7, temp8, temp5);
+	matMultiplication(2, 2, K, 2, 1, temp5, temp6);
+	xvec_est = matSum(2, 1, temp6, x_minus, xvec_est);
+
+	temp3[0][0] = 1.0;
+	temp3[0][1] = 0.0;
+	temp3[1][0] = 0.0;
+	temp3[1][1] = 1.0;
+	matScaleMultiplication(2, 2, K, -1, temp4);
+	matSum(2, 2, temp3, temp4, temp1);
+	matMultiplication(2, 2, temp1, 2, 2, P_minus, P_Kalman);
 
 }
+//END KALMAN FILTER FUNCTION
+
 
 void set_servos(int theta)
 {
@@ -421,3 +529,72 @@ int get_theta(int h, int hdot)
     theta = control_matrix[h][hdot];
     return theta;
 }
+
+// KALMAN FILTER LINEAR ALGEBRA
+void matScaleMultiplication(int row, int column, double **mat, double scale,
+    double** result)
+{
+    for (int i = 0; i < row; i++) {
+        for (int j = 0; j < column; j++) {
+            result[i][j] = mat[i][j] * scale;
+        }
+    }
+
+}
+
+void matMultiplication(int row1, int column1, double **mat1, int row2,
+    int column2, double **mat2, double** result) {
+
+    if (column1 != row2) {
+        cout << "Error: matrix dimension mismatch! \n";
+    } else {
+        double sum;
+        for (int i = 0; i < row1; i++) {
+            for (int j = 0; j < column2; j++) {
+                sum = 0;
+                for (int k = 0; k < column1; k++) {
+                    sum += mat1[i][k] * mat2[k][j];
+                }
+                result[i][j] = sum;
+            }
+        }
+    }
+}
+
+void matSum(int row,  int column, double **mat1, double **mat2,
+    double** result)
+{
+
+    for(int i=0; i<row; i++) {
+        for(int j=0; j<column; j++) {
+            result[i][j] = mat1[i][j] + mat2[i][j];
+        }
+    }
+}
+
+void transpose(int row_in, int column_in, double **mat_in, double **mat_out)
+{
+    double temp;
+    for (int j = 0; j<column_in; j++) {
+        for (int i = 0; i<row_in; i++) {
+            temp = mat_in[i][j];
+            mat_out[j][i] = temp;
+        }
+    }
+}
+
+void mat2Inverse(double **a, double **ainv)
+{
+
+	a_ = a[0][0];
+	b_ = a[0][1];
+	c_ = a[1][0];
+	d_ = a[1][1];
+
+	ainv[0][0] = d_/(a_*d_* - b_*c_*);
+	ainv[0][1] = -b_/(a_*d_* - b_*c_*);
+	ainv[1][0] = -c_/(a_*d_* - b_*c_*);
+	ainv[1][1] = a_/(a_*d_* - b_*c_*);
+
+}
+// END KALMAN FILTER LINEAR ALGEBRA
