@@ -15,7 +15,10 @@
 #include <SD.h>
 #include <Adafruit_Sensor.h>
 #include <Adafruit_ADXL345_U.h>
-//#include "tables.h"
+#include "control_matrix.h"
+
+// Set to 1 for ground testing, set to 0 for flight
+#define GROUND_TEST 0
 
 // Generic catch-all implementation.
 template <typename T_ty> struct TypeInfo { static const char * name; };
@@ -37,6 +40,7 @@ enum states
     LAUNCH_RDY,       /* Armed on launchpad */
     LIFTOFF,          /* Powered flight until clear of launch rail */
     PWR_ASC,          /* Powered flight */
+    UNPWR_ASC,        /* Unpowered flight, active control */
     DESCENT           /* Descent with drogue deployed */
 };
 
@@ -47,7 +51,7 @@ enum states state = LAUNCH_RDY;
 Servo servos[3];
 Adafruit_ADXL345_Unified accel = Adafruit_ADXL345_Unified(12345);
 const int chip_select = 10;
-const int led_pin = 7;
+const int led_pin = 17;
 
 /* Constants */
 const int LAUNCH_RAIL_TIME_MS = 100;
@@ -56,6 +60,7 @@ const int LAUNCH_RDY_SPEED = MILLIS / 1000; // Loop at 1000 Hz (< 3200 Hz limit)
 const int PWR_ASC_SPEED = MILLIS / 20; // Loop at 10 Hz (< 20 Hz limit)
 const int LAUNCH_DETECT_THRESHOLD = 18; // m/s^2, 2gs
 const int LAUNCH_DETECT_COUNTER_THRESHOLD = 7; // Number of times LAUNCH_DETECT_THRESHOLD must be read
+const int MOTOR_BURNOUT_DETECT_COUNTER_THRESHOLD = 10;
 const int APOGEE_DETECT_COUNTER_THRESHOLD = 20;
 const int THETA_MAX = 80;
 
@@ -69,6 +74,7 @@ int alt_input_index = 0;
 int launch_detect_counter = 0;
 int launch_time;
 int apogee_detect_counter = 0;
+int motor_burnout_counter = 0;
 boolean alt_updated = false;
 unsigned long last_log = 0;
 
@@ -90,15 +96,16 @@ void setup()
     Serial1.begin(9600); // Altimeter Serial
     pinMode(led_pin, OUTPUT);
     digitalWrite(led_pin, HIGH);
+
     /* Initialise ADXL345 accelerometer */
-    if(!accel.begin())
-    {
-        Serial.println("No ADXL345 detected ... Check your wiring!");
-        digitalWrite(led_pin, LOW);
-    } else {
-        Serial.println("ADXL345 initialized.");
-        accel.setRange(ADXL345_RANGE_16_G);
-    }
+    // if(!accel.begin())
+    // {
+    //     Serial.println("No ADXL345 detected ... Check your wiring!");
+    //     digitalWrite(led_pin, LOW);
+    // } else {
+    //     Serial.println("ADXL345 initialized.");
+    //     accel.setRange(ADXL345_RANGE_16_G);
+    // }
 
     /* Initialize SD Card */
     pinMode(chip_select, OUTPUT); // Necessary even if chip select pin isn't used.
@@ -116,6 +123,27 @@ void setup()
     for (int i = 0; i < 3; i++)
         servos[i].attach(pins[i]);
 
+    for (int i = 0; i < 3; i++)
+        servos[i].write(0);
+
+        digitalWrite(led_pin, LOW);
+
+    int pos;
+    for (;;) {
+        for(pos = 0; pos < 180; pos += 1)  // goes from 0 degrees to 180 degrees
+        {                                  // in steps of 1 degree
+            for (int i = 0; i < 3; i++)
+                servos[i].write(pos);
+
+            delay(15);                       // waits 15ms for the servo to reach the position
+        }
+        for(pos = 180; pos>=1; pos-=1)     // goes from 180 degrees to 0 degrees
+        {
+            for (int i = 0; i < 3; i++)
+                servos[i].write(pos);
+            delay(15);
+        }
+    }
     state = LAUNCH_RDY;
     loop_time_ms = 0;
 }
@@ -142,6 +170,16 @@ void loop()
         }
         last_time = millis();
     }
+    #if GROUND_TEST
+    // GET ACCEL AND ALT, STORE IN "BUFFER"
+
+    // SEND PIN ANGLE uint8_t OVER SERIAL
+
+    #endif
+    if (Serial.available()) {
+        digitalWrite(led_pin, LOW);
+    }
+    Serial.println("hello");
     alt_updated = update_altitude(); // This is called every loop to make sure we don't lose data
 }
 
@@ -153,7 +191,7 @@ void loop()
 void state_launch_rdy()
 {
     /* Update accel data */
-    accel.getEvent(&accel_event);
+    update_accel();
 
     /* Log just in case we don't change state or something weird */
     if (millis() - last_log >= 50) {
@@ -162,13 +200,13 @@ void state_launch_rdy()
     }
 
     /* Acceleration must pass threshold 7 times to go for launch */
-    if (abs(accel_event.acceleration.x) > LAUNCH_DETECT_THRESHOLD) {
+    if (abs(accel_event.acceleration.y) > LAUNCH_DETECT_THRESHOLD) {
       if (!launch_detect_counter) {
         /* First time passing threshold, record time */
         launch_time = millis();
       }
       launch_detect_counter++;
-  } else launch_detect_counter = 0;
+    } else launch_detect_counter = 0;
 
     /* STATE CHANGE */
     if (launch_detect_counter >= LAUNCH_DETECT_COUNTER_THRESHOLD) {
@@ -185,7 +223,7 @@ void state_launch_rdy()
  */
 void state_liftoff()
 {
-    accel.getEvent(&accel_event);
+    update_accel();
     log_all();
 
     /* STATE CHANGE */
@@ -197,28 +235,60 @@ void state_liftoff()
 }
 
 /*
- * Active control state, update and log, then based
- * on that information, calculate our new servo
- * positions. Exit when a current altitude is
- * less than a previous altitude (reached apogee).
+ * Non-active control state, update flight time
+ * and log. Exit when acceleration is downward (positive)
+ * to mark motor burnout.
  */
 void state_pwr_asc()
 {
-    accel.getEvent(&accel_event);
+    update_accel();
     log_all();
 
     if (alt_updated) {
         alt_updated = false;
         int flight_time = millis() - init_launch_time;
-        int ndx = flight_time / delta_time;
-        if (ndx > 500) ndx = 500;
-        int ideal_h = table_h[ndx];
 
-        int epsilon = curr_altitude - ideal_h;
-        set_servos(get_theta(epsilon));
-
-        /* STATE CHANGE */
         /*
+         * STATE CHANCE CHECK
+         * Change only if accel.y for at least 10 times,
+         * this is to reduce the chance of a false reading
+         */
+        if (accel_event.acceleration.y > 0) {
+            motor_burnout_counter++;
+        } else {
+            motor_burnout_counter = 0;
+        }
+        if (motor_burnout_counter >= MOTOR_BURNOUT_DETECT_COUNTER_THRESHOLD) {
+            state = UNPWR_ASC;
+        }
+    }
+}
+
+/*
+ * Active control state, update and log, then based
+ * on that information, calculate our new servo
+ * positions. Exit when a current altitude is
+ * less than a previous altitude (reached apogee).
+ */
+void state_unpwr_asc()
+{
+    update_accel();
+    log_all();
+
+    if (alt_updated) {
+        alt_updated = false;
+        int flight_time = millis() - init_launch_time;
+
+        /* Get xvec_est = {h, hdot} from kalman filter */
+        int xvec_est[2];
+        kf(curr_altitude, accel_event.acceleration.y, xvec_est);
+
+        /* Use {h, hdor} to get servo angle */
+        int servo_angle = get_theta(xvec_est[0], xvec_est[1]);
+        set_servos(servo_angle);
+
+        /*
+         * STATE CHANGE CHECK
          * Change only if prev_altitude > curr_altitude for at least 10 times,
          * this is to reduce the chance of a false reading
          */
@@ -232,16 +302,12 @@ void state_pwr_asc()
     }
 }
 
-void state_unpwr_asc()
-{
-
-}
 /*
  * Update and log sensor values only.
  */
 void state_descent()
 {
-    accel.getEvent(&accel_event);
+    update_accel();
     log_all();
 }
 
@@ -254,7 +320,7 @@ void state_descent()
  */
 void kf(int h_meas, float a_meas, int *xvec_est)
 {
-    
+
 }
 
 void set_servos(int theta)
@@ -301,6 +367,10 @@ void log_all()
  */
 boolean update_altitude()
 {
+    #if GROUND_TEST
+    // Update altitude from serial source
+    #else
+    // Update altitude from altimeter
     if (Serial1.available()) {
         char c = Serial1.read();
         if (c != '\r' && alt_input_index < 15)
@@ -316,22 +386,38 @@ boolean update_altitude()
             return true;
         }
     }
+    #endif
     return false;
 }
 
-/*
- * Returns a theta value for the servos given a
- * difference between current altitude and ideal
- * altitude.
- */
-int get_theta(double eps)
+void update_accel()
 {
-    int theta;
-    if (abs(eps) <= 0.5)
-        theta = 35;
-    else if (eps >= 0)
-        theta = THETA_MAX;
-    else if (eps < 0)
-        theta = 0;
+    #if GROUND_TEST
+    // Update accelerometer from serial source
+    #else
+    // Update accelerometer from sensor
+    accel.getEvent(&accel_event);
+    #endif
+}
+
+void ground_test_transmit()
+{
+    #if GROUND_TEST
+    // Send servo_angle to Simulink
+    #endif
+}
+
+/*
+ * Returns a theta value for the servos given an
+ * estimated altitude and vertical speed.
+ */
+int get_theta(int h, int hdot)
+{
+    int theta = 0;
+    if (h > 2999) h = 2999;
+    if (h < 0) h = 0;
+    if (hdot > 499) hdot = 499;
+    if (hdot < 0) hdot = 0;
+    theta = control_matrix[h][hdot];
     return theta;
 }
