@@ -62,7 +62,7 @@ const int LAUNCH_DETECT_THRESHOLD = 18; // m/s^2, 2gs
 const int LAUNCH_DETECT_COUNTER_THRESHOLD = 7; // Number of times LAUNCH_DETECT_THRESHOLD must be read
 const int MOTOR_BURNOUT_DETECT_COUNTER_THRESHOLD = 10;
 const int APOGEE_DETECT_COUNTER_THRESHOLD = 20;
-const int THETA_MAX = 80;
+const int THETA_MAX = 90;
 
 /* Variables */
 int loop_time_ms = LAUNCH_RDY_SPEED;
@@ -83,66 +83,34 @@ unsigned long last_led_blink = 0;
 bool last_on = 0;
 File file;
 
-// KALMAN FILTER VARIABLES
-// double ** P_Kalman;// = new double*[2];
-// double ** R_Kalman;// = new double*[2];
-// double ** Q_Kalman;// = new double*[2];
-double P_Kalman[2][2];// = new double*[2];
-double R_Kalman[2][2];// = new double*[2];
-double Q_Kalman[2][2];// = new double*[2];
-double ** A;// = new double*[2];
-double ** Atr;// = new double*[2];
-double ** B;// = new double*[2];
-double ** x_minus;// = new double*[2];
-double ** x_est;// = new double*[2];
-double ** P_minus;// = new double*[2];
-double ** K;// = new double*[2];
-double ** temp1;// = new double*[2];
-double ** temp2;// = new double*[2];
-double ** temp3;// = new double*[2];
-double ** temp4;// = new double*[2];
-double ** temp5;// = new double*[2];
-double ** temp6;// = new double*[2];
-double ** temp7;// = new double*[2];
-double ** temp8;// = new double*[2];
-double ** inv_temp;// = new double*[2];
 
-for (int i=0;i<2;i++) {
-    P_Kalman[i] = new double[2];
-	R_Kalman[i] = new double[2];
-	Q_Kalman[i] = new double[2];
-	A[i] = new double[2];
-	Atr[i] = new double[2];
-	B[i] = new double[1];
-	x_minus[i] = new double[1];
-	x_est[i] = new double[1];
-	P_minus[i] = new double[2];
-	K[i] = new double[2];
-	temp1[i] = new double[2];
-	temp2[i] = new double[2];
-	temp3[i] = new double[2];
-	temp4[i] = new double[2];
-	temp5[i] = new double[1];
-	temp6[i] = new double[1];
-	temp7[i] = new double[1];
-	temp8[i] = new double[1];
-	inv_temp[i] = new double*[2];
-}
+int curr_altitude_buff;
+float accel_buff;
 
-R_Kalman[0][0] = 80.0*80.0;
-R_Kalman[1][1] = 140.0*140.0;
-R_Kalman[0][1] = 0.0;
-R_Kalman[1][0] = 0.0;
-Q_Kalman[0][0] = 0.0;
-Q_Kalman[1][1] = 30.0*30.0;
-Q_Kalman[0][1] = 0.0;
-Q_Kalman[1][0] = 0.0;
-P_Kalman[0][0] = 1.0*1.0;
-P_Kalman[1][1] = 1.0*1.0;
-P_Kalman[0][1] = 0.0;
-P_Kalman[1][0] = 0.0;
+//KALMAN FILTER VARIABLES
+double **P_Kalman = new double*[2];
+double ** R_Kalman = new double*[2];
+double ** Q_Kalman = new double*[2];
+double **A = new double*[2];
+double ** Atr = new double*[2];
+double ** B = new double*[2];
+double ** x_minus = new double*[2];
+double ** xvec_est = new double*[2];
+double ** P_minus = new double*[2];
+double ** K = new double*[2];
+double ** temp1 = new double*[2];
+double ** temp2 = new double*[2];
+double ** temp3 = new double*[2];
+double ** temp4 = new double*[2];
+double ** temp5 = new double*[2];
+double ** temp6 = new double*[2];
+double ** temp7 = new double*[2];
+double ** temp8 = new double*[2];
+double ** inv_temp = new double*[2];
+int unpwr_asc = 0;
+
+
 // END KALMAN FILTER VARIABLES
-
 
 /*
  * Initialize accelerometer, SD card and servo motors.
@@ -165,14 +133,17 @@ void setup()
     // } else {
     //     Serial.println("ADXL345 initialized.");
     //     accel.setRange(ADXL345_RANGE_16_G);
+    //     log_all();
+    //
     // }
+    accel_event.acceleration.y = 0;
 
     /* Initialize SD Card */
     pinMode(chip_select, OUTPUT); // Necessary even if chip select pin isn't used.
-
+    Serial.println("This is happening 1");
     if (!SD.begin(chip_select)) {
         Serial.println("Card failed, or not present");
-        digitalWrite(led_pin, LOW);
+        //digitalWrite(led_pin, LOW);
     } else {
         Serial.println("SD Card initialized.");
         file = SD.open("data.txt", FILE_WRITE); // File name <= 8 chars.
@@ -183,29 +154,64 @@ void setup()
     for (int i = 0; i < 3; i++)
         servos[i].attach(pins[i]);
 
-    for (int i = 0; i < 3; i++)
-        servos[i].write(0);
+    // for (int i = 0; i < 3; i++)
+    //     servos[i].write(160);
 
-        digitalWrite(led_pin, LOW);
+    // set_servos(15);
+    // digitalWrite(led_pin, LOW);
 
     int pos;
     for (;;) {
-        for(pos = 0; pos < 180; pos += 1)  // goes from 0 degrees to 180 degrees
+        for(pos = 0; pos < 90; pos += 1)  // goes from 0 degrees to 180 degrees
         {                                  // in steps of 1 degree
-            for (int i = 0; i < 3; i++)
-                servos[i].write(pos);
-
+            set_servos(pos);
             delay(15);                       // waits 15ms for the servo to reach the position
         }
-        for(pos = 180; pos>=1; pos-=1)     // goes from 180 degrees to 0 degrees
+        for(pos = 90; pos>=0; pos-=1)     // goes from 180 degrees to 0 degrees
         {
-            for (int i = 0; i < 3; i++)
-                servos[i].write(pos);
+            set_servos(pos);
             delay(15);
         }
     }
     state = LAUNCH_RDY;
     loop_time_ms = 0;
+
+    //KALMAN FILTER VARIABLES
+    for (int i=0;i<2;i++) {
+         A[i] = new double[2];
+         Atr[i] = new double[2];
+         B[i] = new double[1];
+         x_minus[i] = new double[1];
+         xvec_est[i] = new double[1];
+         P_minus[i] = new double[2];
+         K[i] = new double[2];
+         temp1[i] = new double[2];
+         temp2[i] = new double[2];
+         temp3[i] = new double[2];
+         temp4[i] = new double[2];
+         temp5[i] = new double[1];
+         temp6[i] = new double[1];
+         temp7[i] = new double[1];
+         temp8[i] = new double[1];
+         inv_temp[i] = new double[2];
+     }
+
+
+    R_Kalman[0][0] = 43.37*43.37;
+    R_Kalman[1][1] = 99.41*99.41;
+    R_Kalman[0][1] = 0.0;
+    R_Kalman[1][0] = 0.0;
+    Q_Kalman[0][0] = 0.0;
+    Q_Kalman[1][1] = 30.0*30.0;
+    Q_Kalman[0][1] = 0.0;
+    Q_Kalman[1][0] = 0.0;
+    P_Kalman[0][0] = 1.0*1.0;
+    P_Kalman[1][1] = 1.0*1.0;
+    P_Kalman[0][1] = 0.0;
+    P_Kalman[1][0] = 0.0;
+    // END KALMAN FILTER VARIABLES
+
+
 }
 
 void loop()
@@ -232,6 +238,7 @@ void loop()
     }
     #if GROUND_TEST
     // GET ACCEL AND ALT, STORE IN "BUFFER"
+    curr_altitude_buff
 
     // SEND PIN ANGLE uint8_t OVER SERIAL
 
@@ -250,8 +257,9 @@ void loop()
  */
 void state_launch_rdy()
 {
+
     /* Update accel data */
-    update_accel();
+    // update_accel();
 
     /* Log just in case we don't change state or something weird */
     if (millis() - last_log >= 50) {
@@ -338,13 +346,19 @@ void state_unpwr_asc()
     if (alt_updated) {
         alt_updated = false;
         int flight_time = millis() - init_launch_time;
+        double loop_time_s = loop_time_ms / 1000.0;
 
         /* Get xvec_est = {h, hdot} from kalman filter */
-        int xvec_est[2];
-        kf(curr_altitude, accel_event.acceleration.y, xvec_est);
-
+        if (unpwr_asc == 0) {
+            xvec_est[0][0] = curr_altitude;
+            double init_vel = (curr_altitude - prev_altitude) / loop_time_s;
+            xvec_est[1][0] = init_vel;
+            unpwr_asc = 1;
+        }
+        kf(curr_altitude, prev_altitude, accel_event.acceleration.y, xvec_est,
+            loop_time_s);
         /* Use {h, hdor} to get servo angle */
-        int servo_angle = get_theta(xvec_est[0], xvec_est[1]);
+        int servo_angle = get_theta(xvec_est[0][0], xvec_est[1][0]);
         set_servos(servo_angle);
 
         /*
@@ -417,7 +431,7 @@ void kf(int h_meas, int h_meas_prev, float a_meas, double **xvec_est,
 	matScaleMultiplication(2, 1, x_minus, -1, temp8);
 	matSum(2, 1, temp7, temp8, temp5);
 	matMultiplication(2, 2, K, 2, 1, temp5, temp6);
-	xvec_est = matSum(2, 1, temp6, x_minus, xvec_est);
+	matSum(2, 1, temp6, x_minus, xvec_est);
 
 	temp3[0][0] = 1.0;
 	temp3[0][1] = 0.0;
@@ -435,9 +449,16 @@ void set_servos(int theta)
 {
     if (theta > THETA_MAX)
         theta = THETA_MAX;
-    else if (theta < 0)
-        theta = 0;
-    int pos = 25 + theta;
+    else if (theta < 15)
+        theta = 15;
+
+    int pos = 75 + theta;
+
+    if (pos > 160)
+        pos = 160;
+    if (pos < 75)
+        pos = 75;
+
     for (int i = 0; i < 3; i++)
         servos[i].write(pos);
 }
@@ -448,8 +469,10 @@ void set_servos(int theta)
  */
 void log_all()
 {
+    digitalWrite(led_pin, LOW);
     if (file) {
         String data_str = "T: ";
+        char buf[12];                       /////
         data_str += millis() - init_launch_time;
         data_str += ", Ac: ";
         data_str += accel_event.acceleration.x;
@@ -477,6 +500,7 @@ boolean update_altitude()
 {
     #if GROUND_TEST
     // Update altitude from serial source
+    // curr_altitude = alt from "buffer"
     #else
     // Update altitude from altimeter
     if (Serial1.available()) {
@@ -521,12 +545,16 @@ void ground_test_transmit()
  */
 int get_theta(int h, int hdot)
 {
-    int theta = 0;
-    if (h > 2999) h = 2999;
-    if (h < 0) h = 0;
-    if (hdot > 499) hdot = 499;
-    if (hdot < 0) hdot = 0;
-    theta = control_matrix[h][hdot];
+    // If h, hdot below expected values hold nominal extension
+    if (h > 2999) return 90;
+    if (h < 500) return 35;
+    if (hdot > 499) return 90;
+    if (hdot < 0) return 35;
+
+    // Lookup extension command from control_matrix table
+    int hndx = (h - 500) / control_matrix_delta;
+    int hdotndx = hdot / control_matrix_delta;
+    int theta = control_matrix[hndx][hdotndx];
     return theta;
 }
 
@@ -546,7 +574,7 @@ void matMultiplication(int row1, int column1, double **mat1, int row2,
     int column2, double **mat2, double** result) {
 
     if (column1 != row2) {
-        cout << "Error: matrix dimension mismatch! \n";
+        Serial.println("Error: matrix dimension mismatch!");
     } else {
         double sum;
         for (int i = 0; i < row1; i++) {
@@ -586,15 +614,15 @@ void transpose(int row_in, int column_in, double **mat_in, double **mat_out)
 void mat2Inverse(double **a, double **ainv)
 {
 
-	a_ = a[0][0];
-	b_ = a[0][1];
-	c_ = a[1][0];
-	d_ = a[1][1];
+	double a_ = a[0][0];
+	double b_ = a[0][1];
+	double c_ = a[1][0];
+	double d_ = a[1][1];
 
-	ainv[0][0] = d_/(a_*d_* - b_*c_*);
-	ainv[0][1] = -b_/(a_*d_* - b_*c_*);
-	ainv[1][0] = -c_/(a_*d_* - b_*c_*);
-	ainv[1][1] = a_/(a_*d_* - b_*c_*);
+	ainv[0][0] = d_/(a_*d_* - b_*c_);
+	ainv[0][1] = -b_/(a_*d_* - b_*c_);
+	ainv[1][0] = -c_/(a_*d_* - b_*c_);
+	ainv[1][1] = a_/(a_*d_* - b_*c_);
 
 }
 // END KALMAN FILTER LINEAR ALGEBRA
