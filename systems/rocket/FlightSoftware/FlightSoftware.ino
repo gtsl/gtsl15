@@ -16,9 +16,10 @@
 #include <Adafruit_Sensor.h>
 #include <Adafruit_ADXL345_U.h>
 #include "control_matrix.h"
+#include "heightinput.h"  //ADDED BY DD.
 
 // Set to 1 for ground testing, set to 0 for flight
-#define GROUND_TEST 0
+#define GROUND_TEST 1  //CHANGED BY DD.
 
 // Generic catch-all implementation.
 template <typename T_ty> struct TypeInfo { static const char * name; };
@@ -68,7 +69,8 @@ const int THETA_MAX = 90;
 int loop_time_ms = LAUNCH_RDY_SPEED;
 unsigned long last_time;
 unsigned long init_launch_time;
-int curr_altitude, prev_altitude;
+int curr_altitude = 0;
+int prev_altitude;
 char alt_input[16];
 int alt_input_index = 0;
 int launch_detect_counter = 0;
@@ -77,6 +79,7 @@ int apogee_detect_counter = 0;
 int motor_burnout_counter = 0;
 boolean alt_updated = false;
 unsigned long last_log = 0;
+int height_index = 0;  //ADDED BY DD.
 
 sensors_event_t accel_event;
 unsigned long last_led_blink = 0;
@@ -88,7 +91,7 @@ int curr_altitude_buff;
 float accel_buff;
 
 //KALMAN FILTER VARIABLES
-double **P_Kalman = new double*[2];
+double **P_Kalman = new double*[2]; 
 double ** R_Kalman = new double*[2];
 double ** Q_Kalman = new double*[2];
 double **A = new double*[2];
@@ -121,11 +124,15 @@ int unpwr_asc = 0;
 void setup()
 {
     Serial.begin(9600);
+    delay(2000);
+    Serial.print("wah wah waaaaaaaaaaaaaaaah");  //ADDED BY DD.
     Serial1.begin(9600); // Altimeter Serial
     pinMode(led_pin, OUTPUT);
     digitalWrite(led_pin, HIGH);
-
-    /* Initialise ADXL345 accelerometer */
+    pinMode(13, OUTPUT);  //ADDED BY DD.
+    digitalWrite(13, HIGH);  //ADDED BY DD.
+ 
+    /* Initialise ADXL345 accelerometer */ 0
     // if(!accel.begin())
     // {
     //     Serial.println("No ADXL345 detected ... Check your wiring!");
@@ -136,18 +143,18 @@ void setup()
     //     log_all();
     //
     // }
-    accel_event.acceleration.y = 0;
+   // accel_event.acceleration.y = 0;
 
-    /* Initialize SD Card */
-    pinMode(chip_select, OUTPUT); // Necessary even if chip select pin isn't used.
-    Serial.println("This is happening 1");
-    if (!SD.begin(chip_select)) {
-        Serial.println("Card failed, or not present");
-        //digitalWrite(led_pin, LOW);
-    } else {
-        Serial.println("SD Card initialized.");
-        file = SD.open("data.txt", FILE_WRITE); // File name <= 8 chars.
-    }
+    /* Initialize SD Card */  //COMMENTED BY DD.
+//    pinMode(chip_select, OUTPUT); // Necessary even if chip select pin isn't used.
+//    Serial.println("This is happening 1");
+//    if (!SD.begin(chip_select)) {
+//        Serial.println("Card failed, or not present");
+//        //digitalWrite(led_pin, LOW);
+//    } else {
+//        Serial.println("SD Card initialized.");
+//        file = SD.open("data.txt", FILE_WRITE); // File name <= 8 chars.
+//    }
 
     /* Initialize servo motors */
     int pins[3] = {21, 22, 23};
@@ -160,24 +167,27 @@ void setup()
     // set_servos(15);
     // digitalWrite(led_pin, LOW);
 
-    int pos;
-    for (;;) {
-        for(pos = 0; pos < 90; pos += 1)  // goes from 0 degrees to 180 degrees
-        {                                  // in steps of 1 degree
-            set_servos(pos);
-            delay(15);                       // waits 15ms for the servo to reach the position
-        }
-        for(pos = 90; pos>=0; pos-=1)     // goes from 180 degrees to 0 degrees
-        {
-            set_servos(pos);
-            delay(15);
-        }
-    }
-    state = LAUNCH_RDY;
+   int pos;
+//    for (;;) {  //COMMENTED BY DD.
+//        for(pos = 0; pos < 90; pos += 1)  // goes from 0 degrees to 180 degrees
+//        {                                  // in steps of 1 degree
+//            set_servos(pos);
+//            delay(15);                       // waits 15ms for the servo to reach the position
+//        }
+//        for(pos = 90; pos>=0; pos-=1)     // goes from 180 degrees to 0 degrees
+//        {
+//            set_servos(pos);
+//            delay(15);
+//        }
+//    }
+    state = PWR_ASC;
     loop_time_ms = 0;
 
     //KALMAN FILTER VARIABLES
     for (int i=0;i<2;i++) {
+         P_Kalman[i] = new double[2];  //ADDED BY DD.
+         R_Kalman[i] = new double[2];  //ADDED BY DD.
+         Q_Kalman[i] = new double[2];  //ADDED BY DD.
          A[i] = new double[2];
          Atr[i] = new double[2];
          B[i] = new double[1];
@@ -236,9 +246,8 @@ void loop()
         }
         last_time = millis();
     }
-    #if GROUND_TEST
+    #if GROUND_TEST  
     // GET ACCEL AND ALT, STORE IN "BUFFER"
-    curr_altitude_buff
 
     // SEND PIN ANGLE uint8_t OVER SERIAL
 
@@ -246,7 +255,7 @@ void loop()
     if (Serial.available()) {
         digitalWrite(led_pin, LOW);
     }
-    Serial.println("hello");
+  //  Serial.println("hello");  //CHANGED BY DD.
     alt_updated = update_altitude(); // This is called every loop to make sure we don't lose data
 }
 
@@ -298,7 +307,7 @@ void state_liftoff()
     if (millis() - init_launch_time > LAUNCH_RAIL_TIME_MS) {
         /* Extend servos to nominal position */
         set_servos(35); // Needs to be changes?
-        state = PWR_ASC;
+        state = PWR_ASC;  //CHANGED BY DD.
     }
 }
 
@@ -355,8 +364,15 @@ void state_unpwr_asc()
             xvec_est[1][0] = init_vel;
             unpwr_asc = 1;
         }
-        kf(curr_altitude, prev_altitude, accel_event.acceleration.y, xvec_est,
+        //ADDED BY DD.
+        double a_meas = (-32.2 - 0.5*0.0023769*0.42*(0.008*(3.28084*3.28084)) / (0.483832186633282)*xvec_est[1][0]*xvec_est[1][0]);  
+        
+        kf(curr_altitude, prev_altitude, a_meas, xvec_est,
             loop_time_s);
+        Serial.print(curr_altitude);  //ADDED BY DD.
+        Serial.print(" "); //ADDED BY DD.
+        Serial.print(xvec_est[0][0]); //ADDED BY DD.
+        Serial.print("\n"); //ADDED BY DD.
         /* Use {h, hdor} to get servo angle */
         int servo_angle = get_theta(xvec_est[0][0], xvec_est[1][0]);
         set_servos(servo_angle);
@@ -499,7 +515,11 @@ void log_all()
 boolean update_altitude()
 {
     #if GROUND_TEST
-    // Update altitude from serial source
+    height_index = height_index + 1;  //ADDED BY DD.
+    int alt_ft = heightinput[height_index]; //ADDED BY DD.
+    prev_altitude = curr_altitude; //ADDED BY DD.
+    curr_altitude = alt_ft; //ADDED BY DD.
+            // Update altitude from serial source
     // curr_altitude = alt from "buffer"
     #else
     // Update altitude from altimeter
@@ -512,9 +532,9 @@ boolean update_altitude()
             alt_input[alt_input_index] = '\0';
             alt_input_index = 0;
             int alt_ft = atoi(alt_input);
-            int alt_m = alt_ft * .304;
+            int alt_m = alt_ft * .304;  
             prev_altitude = curr_altitude;
-            curr_altitude = alt_m;
+            curr_altitude = /*alt_m*/ alt_ft;  //CHANGED BY DD.
             return true;
         }
     }
@@ -553,7 +573,7 @@ int get_theta(int h, int hdot)
 
     // Lookup extension command from control_matrix table
     int hndx = (h - 500) / control_matrix_delta;
-    int hdotndx = hdot / control_matrix_delta;
+    int hdotndx = hdot / 1.0;
     int theta = control_matrix[hndx][hdotndx];
     return theta;
 }
