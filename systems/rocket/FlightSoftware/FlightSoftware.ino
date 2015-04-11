@@ -157,21 +157,22 @@ void setup()
     // for (int i = 0; i < 3; i++)
     //     servos[i].write(160);
 
+    set_servos(25);
     // set_servos(15);
     // digitalWrite(led_pin, LOW);
 
     int pos;
     for (;;) {
-        for(pos = 0; pos < 90; pos += 1)  // goes from 0 degrees to 180 degrees
-        {                                  // in steps of 1 degree
-            set_servos(pos);
-            delay(15);                       // waits 15ms for the servo to reach the position
-        }
-        for(pos = 90; pos>=0; pos-=1)     // goes from 180 degrees to 0 degrees
-        {
-            set_servos(pos);
-            delay(15);
-        }
+        // for(pos = 0; pos < 90; pos += 1)  // goes from 0 degrees to 180 degrees
+        // {                                  // in steps of 1 degree
+        //     set_servos(pos);
+        //     delay(15);                       // waits 15ms for the servo to reach the position
+        // }
+        // for(pos = 90; pos>=0; pos-=1)     // goes from 180 degrees to 0 degrees
+        // {
+        //     set_servos(pos);
+        //     delay(15);
+        // }
     }
     state = LAUNCH_RDY;
     loop_time_ms = 0;
