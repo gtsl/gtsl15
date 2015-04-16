@@ -7,7 +7,7 @@ function table = generate_table(delx,dely)
 hmax = 3000; % (ft)
 hdotmax = 500; % (ft/s)
 % Allocate table to store all possible h, hdot combinations
-table = 90 .* ones(round((hmax + 100)/delx), round((hdotmax + 100)/dely));
+table = 90 .* ones(round((hmax)/delx), round((hdotmax)/dely));
 % Rocket parameters
 Cd_r = .5; % --- changeme ----
 A_r = .1; % (m2)

@@ -19,7 +19,7 @@
 #include "heightinput.h"  //ADDED BY DD.
 
 // Set to 1 for ground testing, set to 0 for flight
-#define GROUND_TEST 1  //CHANGED BY DD.
+#define GROUND_TEST 0  //CHANGED BY DD.
 
 // Generic catch-all implementation.
 template <typename T_ty> struct TypeInfo { static const char * name; };
@@ -58,23 +58,31 @@ const int led_pin = 17;
 const int LAUNCH_RAIL_TIME_MS = 100;
 const int MILLIS = 1000; // Milliseconds in a second, for converting from hertz to millis
 const int LAUNCH_RDY_SPEED = MILLIS / 1000; // Loop at 1000 Hz (< 3200 Hz limit)
-const int PWR_ASC_SPEED = MILLIS / 20; // Loop at 10 Hz (< 20 Hz limit)
-const int LAUNCH_DETECT_THRESHOLD = 18; // m/s^2, 2gs
-const int LAUNCH_DETECT_COUNTER_THRESHOLD = 7; // Number of times LAUNCH_DETECT_THRESHOLD must be read
+const int PWR_ASC_SPEED = MILLIS / 10; // Loop at 10 Hz (< 20 Hz limit)
+const int LAUNCH_DETECT_THRESHOLD = 500; // ft, via altimeter
+const int LAUNCH_DETECT_COUNTER_THRESHOLD = 3; // Number of times LAUNCH_DETECT_THRESHOLD must be read
 const int MOTOR_BURNOUT_DETECT_COUNTER_THRESHOLD = 10;
 const int APOGEE_DETECT_COUNTER_THRESHOLD = 20;
-const int THETA_MAX = 90;
+
+const int THETA_MIN = 0;//90;
+const int THETA_MAX = 90;//160;
+
+const int LOOP_SPEED = 10; // Change once a second
+const int BURN_OUT_ALT = 300; // Check this
+const int BURN_OUT_THRESH = 3;
 
 /* Variables */
 int loop_time_ms = LAUNCH_RDY_SPEED;
 unsigned long last_time;
-unsigned long init_launch_time;
+unsigned long init_burn_out_time;
+unsigned long init_launch_time = 0;
 int curr_altitude = 0;
 int prev_altitude;
 char alt_input[16];
 int alt_input_index = 0;
 int launch_detect_counter = 0;
 int launch_time;
+int burn_out_time;
 int apogee_detect_counter = 0;
 int motor_burnout_counter = 0;
 boolean alt_updated = false;
@@ -89,6 +97,8 @@ File file;
 
 int curr_altitude_buff;
 float accel_buff;
+
+int alt_refresh = 0;
 
 //KALMAN FILTER VARIABLES
 double **P_Kalman = new double*[2];
@@ -125,24 +135,24 @@ void setup()
 {
     Serial.begin(9600);
     delay(2000);
-    Serial.print("wah wah waaaaaaaaaaaaaaaah");  //ADDED BY DD.
+    Serial.print("setup()");  //ADDED BY DD.
     Serial1.begin(9600); // Altimeter Serial
     pinMode(led_pin, OUTPUT);
     digitalWrite(led_pin, HIGH);
     pinMode(13, OUTPUT);  //ADDED BY DD.
     digitalWrite(13, HIGH);  //ADDED BY DD.
 
-    /* Initialise ADXL345 accelerometer */ 0
-    // if(!accel.begin())
-    // {
-    //     Serial.println("No ADXL345 detected ... Check your wiring!");
-    //     digitalWrite(led_pin, LOW);
-    // } else {
-    //     Serial.println("ADXL345 initialized.");
-    //     accel.setRange(ADXL345_RANGE_16_G);
-    //     log_all();
-    //
-    // }
+    /* Initialise ADXL345 accelerometer */
+   //  if(!accel.begin())
+   //  {
+   //      Serial.println("No ADXL345 detected ... Check your wiring!");
+   //      digitalWrite(led_pin, LOW);
+   //  } else {
+   //      Serial.println("ADXL345 initialized.");
+   //      accel.setRange(ADXL345_RANGE_16_G);
+   //      log_all();
+   //
+   //  }
    // accel_event.acceleration.y = 0;
 
     /* Initialize SD Card */  //COMMENTED BY DD.
@@ -164,23 +174,8 @@ void setup()
     // for (int i = 0; i < 3; i++)
     //     servos[i].write(160);
 
-    set_servos(25);
-    // set_servos(15);
-    // digitalWrite(led_pin, LOW);
+    set_servos(0);
 
-    int pos;
-    for (;;) {
-        // for(pos = 0; pos < 90; pos += 1)  // goes from 0 degrees to 180 degrees
-        // {                                  // in steps of 1 degree
-        //     set_servos(pos);
-        //     delay(15);                       // waits 15ms for the servo to reach the position
-        // }
-        // for(pos = 90; pos>=0; pos-=1)     // goes from 180 degrees to 0 degrees
-        // {
-        //     set_servos(pos);
-        //     delay(15);
-        // }
-    }
     state = LAUNCH_RDY;
 
     loop_time_ms = 0;
@@ -214,7 +209,7 @@ void setup()
     R_Kalman[0][1] = 0.0;
     R_Kalman[1][0] = 0.0;
     Q_Kalman[0][0] = 0.0;
-    Q_Kalman[1][1] = 30.0*30.0;
+    Q_Kalman[1][1] = 3.0*3.0;
     Q_Kalman[0][1] = 0.0;
     Q_Kalman[1][0] = 0.0;
     P_Kalman[0][0] = 1.0*1.0;
@@ -233,12 +228,12 @@ void loop()
         case LAUNCH_RDY:
             state_launch_rdy();
             break;
-        case LIFTOFF:
-            state_liftoff();
-            break;
-        case PWR_ASC:
-            state_pwr_asc();
-            break;
+        // case LIFTOFF:
+        //     state_liftoff();
+        //     break;
+        // case PWR_ASC:
+        //     state_pwr_asc();
+        //     break;
         case UNPWR_ASC:
             state_unpwr_asc();
             break;
@@ -254,11 +249,12 @@ void loop()
     // SEND PIN ANGLE uint8_t OVER SERIAL
 
     #endif
-    if (Serial.available()) {
-        digitalWrite(led_pin, LOW);
-    }
+    // if (Serial.available()) {
+    //     digitalWrite(led_pin, LOW);
+    // }
   //  Serial.println("hello");  //CHANGED BY DD.
-    alt_updated = update_altitude(); // This is called every loop to make sure we don't lose data
+    update_altitude(); // This is called every loop to make sure we don't lose data
+
 }
 
 /*
@@ -271,7 +267,9 @@ void state_launch_rdy()
 
     /* Update accel data */
     // update_accel();
-
+    // Serial.print("state_launch_rdy() ");
+    // Serial.print(curr_altitude);
+    // Serial.print("\n");
     /* Log just in case we don't change state or something weird */
     if (millis() - last_log >= 50) {
         log_all();
@@ -279,19 +277,20 @@ void state_launch_rdy()
     }
 
     /* Acceleration must pass threshold 7 times to go for launch */
-    if (abs(accel_event.acceleration.y) > LAUNCH_DETECT_THRESHOLD) {
+    if (curr_altitude > BURN_OUT_ALT) {
       if (!launch_detect_counter) {
         /* First time passing threshold, record time */
-        launch_time = millis();
+        burn_out_time = millis();
       }
       launch_detect_counter++;
     } else launch_detect_counter = 0;
 
     /* STATE CHANGE */
-    if (launch_detect_counter >= LAUNCH_DETECT_COUNTER_THRESHOLD) {
+    if (launch_detect_counter >= BURN_OUT_THRESH) {
         loop_time_ms = PWR_ASC_SPEED;
-        init_launch_time = launch_time;
-        state = LIFTOFF;
+        init_burn_out_time = burn_out_time;
+        state = UNPWR_ASC;
+        Serial.println("state_unpwr_asc()");
         digitalWrite(led_pin, LOW);
     }
 }
@@ -300,48 +299,54 @@ void state_launch_rdy()
  * Update and log until we clear the launch rail
  * based on amount of time since launch started.
  */
-void state_liftoff()
-{
-    update_accel();
-    log_all();
-
-    /* STATE CHANGE */
-    if (millis() - init_launch_time > LAUNCH_RAIL_TIME_MS) {
-        /* Extend servos to nominal position */
-        set_servos(35); // Needs to be changes?
-        state = PWR_ASC;  //CHANGED BY DD.
-    }
-}
+// void state_liftoff()
+// {
+//     Serial.println("state_liftoff() ");
+//     Serial.print(curr_altitude);
+//     Serial.print("\n");
+//     update_accel();
+//     log_all();
+//
+//     /* STATE CHANGE */
+//     if (millis() - init_launch_time > LAUNCH_RAIL_TIME_MS) {
+//         /* Extend servos to nominal position */
+//         set_servos(35); // Needs to be changes?
+//         state = PWR_ASC;  //CHANGED BY DD.
+//     }
+// }
 
 /*
  * Non-active control state, update flight time
  * and log. Exit when acceleration is downward (positive)
  * to mark motor burnout.
  */
-void state_pwr_asc()
-{
-    update_accel();
-    log_all();
-
-    if (alt_updated) {
-        alt_updated = false;
-        int flight_time = millis() - init_launch_time;
-
-        /*
-         * STATE CHANCE CHECK
-         * Change only if accel.y for at least 10 times,
-         * this is to reduce the chance of a false reading
-         */
-        if (accel_event.acceleration.y > 0) {
-            motor_burnout_counter++;
-        } else {
-            motor_burnout_counter = 0;
-        }
-        if (motor_burnout_counter >= MOTOR_BURNOUT_DETECT_COUNTER_THRESHOLD) {
-            state = UNPWR_ASC;
-        }
-    }
-}
+// void state_pwr_asc()
+// {
+//     Serial.println("state_pwr_asc() ");
+//     Serial.print(curr_altitude);
+//     Serial.print("\n");
+//     update_accel();
+//     log_all();
+//
+//     if (alt_updated) {
+//         alt_updated = false;
+//         int flight_time = millis() - init_launch_time;
+//
+//         /*
+//          * STATE CHANCE CHECK
+//          * Change only if accel.y for at least 10 times,
+//          * this is to reduce the chance of a false reading
+//          */
+//         if (accel_event.acceleration.y > 0) {
+//             motor_burnout_counter++;
+//         } else {
+//             motor_burnout_counter = 0;
+//         }
+//         if (motor_burnout_counter >= MOTOR_BURNOUT_DETECT_COUNTER_THRESHOLD) {
+//             state = UNPWR_ASC;
+//         }
+//     }
+// }
 
 /*
  * Active control state, update and log, then based
@@ -351,12 +356,17 @@ void state_pwr_asc()
  */
 void state_unpwr_asc()
 {
-    update_accel();
+    // Serial.print("state_unpwr_asc() ");
+    // Serial.print(curr_altitude);
+    // Serial.print("\n");
+    // update_accel();
     log_all();
 
     if (alt_updated) {
         alt_updated = false;
-        int flight_time = millis() - init_launch_time;
+        Serial.print("alt_updated...");
+
+        //int flight_time = millis() - init_launch_time;
         double loop_time_s = loop_time_ms / 1000.0;
 
         /* Get xvec_est = {h, hdot} from kalman filter */
@@ -367,17 +377,35 @@ void state_unpwr_asc()
             unpwr_asc = 1;
         }
         //ADDED BY DD.
-        double a_meas = (-32.2 - 0.5*0.0023769*0.42*(0.008*(3.28084*3.28084)) / (0.483832186633282)*xvec_est[1][0]*xvec_est[1][0]);
+        float v = (curr_altitude-prev_altitude)/loop_time_s;
+        double a_meas = (-32.2 - 0.5*0.0023769*0.42*(0.008*(3.28084*3.28084))
+            / (0.483832186633282)*v*v);
 
         kf(curr_altitude, prev_altitude, a_meas, xvec_est,
             loop_time_s);
+        Serial.println("updating ats...");
         Serial.print(curr_altitude);  //ADDED BY DD.
         Serial.print(" "); //ADDED BY DD.
         Serial.print(xvec_est[0][0]); //ADDED BY DD.
         Serial.print("\n"); //ADDED BY DD.
+
+        /// debug stuff
+
+        Serial.print(table_v[height_index]);
+        Serial.print(" ");
+        Serial.print((curr_altitude-prev_altitude)/loop_time_s);
+        Serial.print(" ");
+        Serial.print(xvec_est[1][0]);
+        Serial.print("\n");
+        /// end debug stuff
+
         /* Use {h, hdor} to get servo angle */
-        int servo_angle = get_theta(xvec_est[0][0], xvec_est[1][0]);
+        int servo_angle = get_theta(curr_altitude, xvec_est[1][0]);
         set_servos(servo_angle);
+
+        Serial.print("servo angle: ");
+        Serial.print(servo_angle);
+        Serial.print("\n");
 
         /*
          * STATE CHANGE CHECK
@@ -399,6 +427,7 @@ void state_unpwr_asc()
  */
 void state_descent()
 {
+    Serial.println("state_descent()");
     update_accel();
     log_all();
 }
@@ -467,8 +496,8 @@ void set_servos(int theta)
 {
     if (theta > THETA_MAX)
         theta = THETA_MAX;
-    else if (theta < 15)
-        theta = 15;
+    else if (theta < 17)
+        theta = 17;
 
     int pos = 75 + theta;
 
@@ -487,25 +516,25 @@ void set_servos(int theta)
  */
 void log_all()
 {
-    digitalWrite(led_pin, LOW);
-    if (file) {
-        String data_str = "T: ";
-        char buf[12];                       /////
-        data_str += millis() - init_launch_time;
-        data_str += ", Ac: ";
-        data_str += accel_event.acceleration.x;
-        data_str += ", ";
-        data_str += accel_event.acceleration.y;
-        data_str += ", ";
-        data_str += accel_event.acceleration.z;
-        data_str += ", Al: ";
-        data_str += curr_altitude;
-        data_str += ", St: ";
-        data_str += state;
-
-      file.println(data_str);
-      file.flush();
-    }
+    // digitalWrite(led_pin, LOW);
+    // if (file) {
+    //     String data_str = "T: ";
+    //     char buf[12];                       /////
+    //     data_str += millis() - init_launch_time;
+    //     data_str += ", Ac: ";
+    //     data_str += accel_event.acceleration.x;
+    //     data_str += ", ";
+    //     data_str += accel_event.acceleration.y;
+    //     data_str += ", ";
+    //     data_str += accel_event.acceleration.z;
+    //     data_str += ", Al: ";
+    //     data_str += curr_altitude;
+    //     data_str += ", St: ";
+    //     data_str += state;
+    //
+    //   file.println(data_str);
+    //   file.flush();
+    // }
 }
 
 /*
@@ -514,15 +543,19 @@ void log_all()
  * whenever altitude was updated.
  * THIS MUST BE CALLED AS FAST AS POSSIBLE
  */
-boolean update_altitude()
+void update_altitude()
 {
     #if GROUND_TEST
+    if (millis() - alt_refresh < 500)
+        return;
+    alt_refresh = millis();
     height_index = height_index + 1;  //ADDED BY DD.
     int alt_ft = heightinput[height_index]; //ADDED BY DD.
     prev_altitude = curr_altitude; //ADDED BY DD.
     curr_altitude = alt_ft; //ADDED BY DD.
             // Update altitude from serial source
     // curr_altitude = alt from "buffer"
+    alt_updated = true;
     #else
     // Update altitude from altimeter
     if (Serial1.available()) {
@@ -537,11 +570,11 @@ boolean update_altitude()
             int alt_m = alt_ft * .304;
             prev_altitude = curr_altitude;
             curr_altitude = /*alt_m*/ alt_ft;  //CHANGED BY DD.
-            return true;
+            alt_updated = true;
+            Serial.println(curr_altitude);
         }
     }
     #endif
-    return false;
 }
 
 void update_accel()
@@ -550,7 +583,7 @@ void update_accel()
     // Update accelerometer from serial source
     #else
     // Update accelerometer from sensor
-    accel.getEvent(&accel_event);
+    // accel.getEvent(&accel_event);
     #endif
 }
 
